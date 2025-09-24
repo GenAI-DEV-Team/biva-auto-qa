@@ -525,6 +525,15 @@ const Index = () => {
                     </div>
                     <div className="flex items-center gap-3 mb-4">
                       <Input placeholder="Filter by customer phone" className="flex-1" value={convPhoneFilter} onChange={(e) => setConvPhoneFilter(e.target.value)} />
+                      <Select value={conversationsBotFilter !== null ? String(conversationsBotFilter) : ""} onValueChange={(v) => { setConversationsBotFilter(v ? Number(v) : null); setConvPage(1); }}>
+                        <SelectTrigger className="w-[180px]"><SelectValue placeholder="Filter by Bot index" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">All Bots</SelectItem>
+                          {(bots ?? []).map((b) => (
+                            <SelectItem key={b.index} value={String(b.index)}>{b.index} - {b.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <Select value={convSortDir} onValueChange={(v) => setConvSortDir(v as any)}>
                         <SelectTrigger className="w-[140px]"><SelectValue placeholder="Sort" /></SelectTrigger>
                         <SelectContent>
