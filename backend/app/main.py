@@ -23,13 +23,25 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Set up CORS
+# Set up CORS using settings
+def parse_csv(value: str | None) -> list[str] | str:
+    if value is None:
+        return "*"
+    value = value.strip()
+    if value == "*" or value == "":
+        return "*"
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+allow_origins = parse_csv(settings.CORS_ALLOW_ORIGINS)
+allow_methods = parse_csv(settings.CORS_ALLOW_METHODS)
+allow_headers = parse_csv(settings.CORS_ALLOW_HEADERS)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=allow_origins if isinstance(allow_origins, list) else ["*"],
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=allow_methods if isinstance(allow_methods, list) else ["*"],
+    allow_headers=allow_headers if isinstance(allow_headers, list) else ["*"],
 )
 
 # Include API router

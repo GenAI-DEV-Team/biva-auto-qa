@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
+    # CORS
+    CORS_ALLOW_ORIGINS: str | None = None  # comma-separated
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: str = "*"  # comma-separated or '*'
+    CORS_ALLOW_HEADERS: str = "*"  # comma-separated or '*'
+
     # Pydantic configuration
     model_config = SettingsConfigDict(
         env_file=".env",
