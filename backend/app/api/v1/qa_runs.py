@@ -143,7 +143,7 @@ async def _eval_single(
     try:
         content = await asyncio.wait_for(
             openai_service.chat_completion(
-                models="gpt-4.1-mini",
+                model="gpt-4.1-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": "mode: đưa ra thông tin tri tiết, không bình luận\n" + user_prompt},

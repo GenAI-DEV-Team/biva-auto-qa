@@ -14,7 +14,7 @@ export async function listConversations(params?: {
   if (params?.start_ts) search.set("start_ts", params.start_ts);
   if (params?.end_ts) search.set("end_ts", params.end_ts);
   search.set("limit", String(params?.limit ?? 50));
-  return apiFetch<ConversationResponse[]>(`${API_V1}/conversations?${search.toString()}`);
+  return apiFetch<ConversationResponse[]>(`${API_V1}/conversations/?${search.toString()}`);
 }
 
 export async function getConversation(conversationId: string): Promise<ConversationResponse> {

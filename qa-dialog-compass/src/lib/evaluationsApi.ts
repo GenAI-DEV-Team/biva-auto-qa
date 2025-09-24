@@ -8,7 +8,7 @@ export async function getEvaluation(conversationId: string): Promise<EvaluationR
 }
 
 export async function listEvaluations(limit = 50): Promise<EvaluationRecord[]> {
-  return apiFetch<EvaluationRecord[]>(`${API_V1}/evaluations?limit=${limit}`);
+  return apiFetch<EvaluationRecord[]>(`${API_V1}/evaluations/?limit=${limit}`);
 }
 
 export async function runQAEvaluations(params: { conversation_ids?: string[]; limit?: number }): Promise<QARunResult[]> {
