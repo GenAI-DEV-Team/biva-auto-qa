@@ -8,7 +8,8 @@ export async function getEvaluation(conversationId: string): Promise<EvaluationR
 }
 
 export async function listEvaluations(limit = 50): Promise<EvaluationRecord[]> {
-  return apiFetch<EvaluationRecord[]>(`${API_V1}/evaluations/?limit=${limit}`);
+  const capped = Math.min(limit ?? 50, 200);
+  return apiFetch<EvaluationRecord[]>(`${API_V1}/evaluations/?limit=${capped}`);
 }
 
 export async function runQAEvaluations(params: { conversation_ids?: string[]; limit?: number }): Promise<QARunResult[]> {

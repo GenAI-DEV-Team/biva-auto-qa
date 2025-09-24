@@ -250,6 +250,7 @@ async def fetch_conversations_time_range(
     start_ts: Optional[str] = None,
     end_ts: Optional[str] = None,
     limit: int = 500,
+    offset: int = 0,
 ) -> List[ConversationRow]:
     sql = text(
         """
@@ -266,9 +267,10 @@ async def fetch_conversations_time_range(
           AND (:end_ts IS NULL OR c.created_at < :end_ts)
         ORDER BY c.created_at DESC
         LIMIT :limit
+        OFFSET :offset
         """
     )
-    params = {"bot_id": bot_id, "start_ts": start_ts, "end_ts": end_ts, "limit": limit}
+    params = {"bot_id": bot_id, "start_ts": start_ts, "end_ts": end_ts, "limit": limit, "offset": offset}
     result = await db.execute(sql, params)
     rows = result.mappings().all()
     return [ConversationRow(**dict(row)) for row in rows]

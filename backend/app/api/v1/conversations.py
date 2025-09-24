@@ -34,6 +34,7 @@ async def list_conversations(
     start_ts: Optional[str] = None,
     end_ts: Optional[str] = None,
     limit: int = 50,
+    offset: int = 0,
     db: AsyncSession = Depends(get_read_db)
 ):
     """List conversations from read DB with filters. Only returns CALLs (exclude chats).
@@ -48,6 +49,7 @@ async def list_conversations(
         start_ts=start_ts,
         end_ts=end_ts,
         limit=limit,
+        offset=offset,
     )
     # Keep only call-type: customer_phone is not null/empty
     calls = [
