@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: autoqa
       POSTGRES_PASSWORD: autoqa
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +20,7 @@ services:
     image: redis:7
     container_name: autoqa-redis
     ports:
-      - "6379:6379"
+      - "6378:6379"
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data
