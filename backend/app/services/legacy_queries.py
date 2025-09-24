@@ -75,9 +75,13 @@ async def fetch_conversations(db: AsyncSession, limit: int = 100) -> List[Conver
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"limit": limit})
-    rows = result.mappings().all()
-    return [ConversationRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"limit": limit})
+        rows = result.mappings().all()
+        return [ConversationRow(**dict(row)) for row in rows]
+    except Exception:
+        # Legacy table may not exist; return empty list gracefully
+        return []
 
 
 async def fetch_bot_detail(db: AsyncSession, bot_id: int) -> List[BotDetailRow]:
@@ -158,9 +162,12 @@ async def fetch_conversations_with_bot(db: AsyncSession, limit: int = 200) -> Li
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"limit": limit})
-    rows = result.mappings().all()
-    return [ConversationWithBotRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"limit": limit})
+        rows = result.mappings().all()
+        return [ConversationWithBotRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_opt_sessions_with_bot(db: AsyncSession, limit: int = 200) -> List[OptSessionWithBotRow]:
@@ -200,9 +207,12 @@ async def fetch_conversations_by_bot(db: AsyncSession, bot_id: int, limit: int =
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"bot_id": bot_id, "limit": limit})
-    rows = result.mappings().all()
-    return [ConversationByBotRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"bot_id": bot_id, "limit": limit})
+        rows = result.mappings().all()
+        return [ConversationByBotRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_conversations_by_phone_like(db: AsyncSession, phone_like: str, limit: int = 200) -> List[ConversationRow]:
@@ -221,9 +231,12 @@ async def fetch_conversations_by_phone_like(db: AsyncSession, phone_like: str, l
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"phone_like": phone_like, "limit": limit})
-    rows = result.mappings().all()
-    return [ConversationRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"phone_like": phone_like, "limit": limit})
+        rows = result.mappings().all()
+        return [ConversationRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_opt_sessions_by_bot(db: AsyncSession, bot_id: int, limit: int = 200) -> List[OptimizationSessionRow]:
@@ -271,9 +284,12 @@ async def fetch_conversations_time_range(
         """
     )
     params = {"bot_id": bot_id, "start_ts": start_ts, "end_ts": end_ts, "limit": limit, "offset": offset}
-    result = await db.execute(sql, params)
-    rows = result.mappings().all()
-    return [ConversationRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, params)
+        rows = result.mappings().all()
+        return [ConversationRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_conversations_with_memory_by_bot(
@@ -298,9 +314,12 @@ async def fetch_conversations_with_memory_by_bot(
         """
     )
     params = {"bot_id": bot_id, "limit": limit}
-    result = await db.execute(sql, params)
-    rows = result.mappings().all()
-    return [ConversationMemoryRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, params)
+        rows = result.mappings().all()
+        return [ConversationMemoryRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_chat_type_conversations(db: AsyncSession, limit: int = 300) -> List[ConversationRow]:
@@ -318,9 +337,12 @@ async def fetch_chat_type_conversations(db: AsyncSession, limit: int = 300) -> L
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"limit": limit})
-    rows = result.mappings().all()
-    return [ConversationRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"limit": limit})
+        rows = result.mappings().all()
+        return [ConversationRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 
 async def fetch_call_type_conversations(db: AsyncSession, limit: int = 300) -> List[ConversationRow]:
@@ -338,8 +360,11 @@ async def fetch_call_type_conversations(db: AsyncSession, limit: int = 300) -> L
         LIMIT :limit
         """
     )
-    result = await db.execute(sql, {"limit": limit})
-    rows = result.mappings().all()
-    return [ConversationRow(**dict(row)) for row in rows]
+    try:
+        result = await db.execute(sql, {"limit": limit})
+        rows = result.mappings().all()
+        return [ConversationRow(**dict(row)) for row in rows]
+    except Exception:
+        return []
 
 

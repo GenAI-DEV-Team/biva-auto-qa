@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: devHost,
       port: devPort,
+      allowedHosts: ["autoqa.trieungoctam.site", "localhost", "127.0.0.1"],
       proxy: {
         "/api": {
           target: proxyTarget,

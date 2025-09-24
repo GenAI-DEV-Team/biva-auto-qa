@@ -13,6 +13,7 @@ from datetime import datetime
 import logging
 import json
 import re
+from app.core.redis import get_redis
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -49,14 +50,18 @@ async def create_bot(
     - Check the read DB (legacy) for a bot whose id equals the provided index.
     - If found, create a new Bot in the write DB mirroring legacy fields.
     """
-    legacy_rows = await fetch_bot_detail(read_db, bot_id=bot_data.index)
-    if not legacy_rows:
-        raise HTTPException(status_code=404, detail="Legacy bot not found")
+    # Try to fetch legacy bot details. If the legacy schema/table doesn't exist,
+    # continue with minimal defaults instead of failing the request.
+    try:
+        legacy_rows = await fetch_bot_detail(read_db, bot_id=bot_data.index)
+    except Exception as e:
+        logger.warning("Legacy fetch failed for bot_id=%s: %s", bot_data.index, e)
+        legacy_rows = []
 
-    legacy_bot = legacy_rows[0]
+    legacy_bot = legacy_rows[0] if legacy_rows else None
 
     # Avoid duplicates if already created
-    existing_query = select(Bot).where(Bot.bot_index == legacy_bot.id)
+    existing_query = select(Bot).where(Bot.bot_index == (legacy_bot.id if legacy_bot else bot_data.index))
     existing_result = await db.execute(existing_query)
     existing_bot = existing_result.scalar_one_or_none()
     if existing_bot:
@@ -70,8 +75,8 @@ async def create_bot(
     
 
     bot = Bot(
-        bot_index=legacy_bot.id,
-        name=legacy_bot.name or f"Bot {legacy_bot.id}",
+        bot_index=(legacy_bot.id if legacy_bot else bot_data.index),
+        name=(legacy_bot.name if (legacy_bot and getattr(legacy_bot, "name", None)) else f"Bot {bot_data.index}"),
 
     )
 
@@ -80,7 +85,7 @@ async def create_bot(
 
     # Seed initial bot version using legacy system_prompt when available
     system_prompt = (
-        legacy_bot.system_prompt if getattr(legacy_bot, "system_prompt", None) else "Imported from legacy bot"
+        legacy_bot.system_prompt if (legacy_bot and getattr(legacy_bot, "system_prompt", None)) else "Imported from legacy bot"
     )
     initial_version = BotVersion(
         bot_index=bot.bot_index,
@@ -90,7 +95,7 @@ async def create_bot(
     db.add(initial_version)
 
     # Build knowledge_base via LLM from the legacy system_prompt
-    if getattr(legacy_bot, "system_prompt", None):
+    if legacy_bot and getattr(legacy_bot, "system_prompt", None):
         try:
             knowledge_prompt = load_prompt("knowledge.md")
             messages = [
@@ -123,11 +128,21 @@ async def create_bot(
 )
 async def list_bots(limit: int = Query(100, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
     """List all bots"""
-    query = select(Bot)
+    redis = await get_redis()
+    cache_key = f"bots:list:{limit}"
+    cached = await redis.get(cache_key)
+    if cached:
+        try:
+            data = json.loads(cached)
+            return [BotResponse(**x) for x in data]
+        except Exception:
+            pass
+
+    query = select(Bot).order_by(Bot.created_at.desc()).limit(limit)
     result = await db.execute(query)
     bots = result.scalars().all()
 
-    return [
+    payload = [
         BotResponse(
             id=str(bot.id),
             index=bot.bot_index,
@@ -136,6 +151,12 @@ async def list_bots(limit: int = Query(100, ge=1, le=1000), db: AsyncSession = D
         )
         for bot in bots
     ]
+    try:
+        # Bots TTL: 1 day
+        await redis.setex(cache_key, 86400, json.dumps([p.dict() for p in payload]))
+    except Exception:
+        pass
+    return payload
 
 @router.get(
     "/{bot_id}",

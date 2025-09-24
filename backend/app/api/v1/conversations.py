@@ -7,6 +7,7 @@ from app.core.db import get_read_db, get_db
 from app.services.legacy_queries import fetch_conversations_time_range
 from datetime import datetime
 import json
+from app.core.redis import get_redis
 
 router = APIRouter()
 
@@ -33,6 +34,7 @@ async def list_conversations(
     bot_id: Optional[int] = None,
     start_ts: Optional[str] = None,
     end_ts: Optional[str] = None,
+    phone_like: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_read_db)
@@ -43,30 +45,65 @@ async def list_conversations(
     - start_ts, end_ts: ISO timestamps or DB-compatible datetime strings
     - limit: max rows
     """
-    rows = await fetch_conversations_time_range(
-        db,
-        bot_id=bot_id,
-        start_ts=start_ts,
-        end_ts=end_ts,
-        limit=limit,
-        offset=offset,
+    # Try cache first
+    cache_key = f"conv:list:{bot_id}:{start_ts}:{end_ts}:{phone_like}:{limit}:{offset}"
+    redis = await get_redis()
+    cached = await redis.get(cache_key)
+    if cached:
+        try:
+            data = json.loads(cached)
+            return [ConversationResponse(**x) for x in data]
+        except Exception:
+            pass
+
+    # Fetch only CALL type rows at SQL level to honor pagination semantics
+    sql = text(
+        """
+        SELECT
+          c.id,
+          c.conversation_id,
+          c.customer_phone,
+          c.bot_id,
+          c.created_at,
+          c.updated_at
+        FROM conversation c
+        WHERE (c.customer_phone IS NOT NULL AND TRIM(c.customer_phone) <> '')
+          AND (:bot_id IS NULL OR c.bot_id = :bot_id)
+          AND (:start_ts IS NULL OR c.created_at >= :start_ts)
+          AND (:end_ts IS NULL OR c.created_at < :end_ts)
+          AND (:phone_like IS NULL OR c.customer_phone LIKE :phone_like)
+        ORDER BY c.created_at DESC
+        LIMIT :limit
+        OFFSET :offset
+        """
     )
-    # Keep only call-type: customer_phone is not null/empty
-    calls = [
-        r for r in rows
-        if r.customer_phone is not None and str(r.customer_phone).strip() != ""
-    ]
-    return [
+    params = {
+        "bot_id": bot_id,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "phone_like": (f"%{phone_like}%" if phone_like else None),
+        "limit": limit,
+        "offset": offset,
+    }
+    result = await db.execute(sql, params)
+    calls = result.mappings().all()
+    payload = [
         ConversationResponse(
-            id=r.id,
-            conversation_id=r.conversation_id,
-            customer_phone=r.customer_phone,
-            bot_id=r.bot_id,
-            created_at=r.created_at,
-            updated_at=r.updated_at,
+            id=r["id"],
+            conversation_id=r["conversation_id"],
+            customer_phone=r["customer_phone"],
+            bot_id=r["bot_id"],
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
         )
         for r in calls
     ]
+    try:
+        # Conversations TTL: 5 hours
+        await redis.setex(cache_key, 5 * 60 * 60, json.dumps([p.dict() for p in payload]))
+    except Exception:
+        pass
+    return payload
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
 async def get_conversation(conversation_id: str, db: AsyncSession = Depends(get_read_db)):
@@ -79,8 +116,11 @@ async def get_conversation(conversation_id: str, db: AsyncSession = Depends(get_
         LIMIT 1
         """
     )
-    result = await db.execute(sql, {"cid": conversation_id})
-    row = result.mappings().first()
+    try:
+        result = await db.execute(sql, {"cid": conversation_id})
+        row = result.mappings().first()
+    except Exception:
+        row = None
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -104,8 +144,11 @@ async def get_conversation_spans(conversation_id: str, db: AsyncSession = Depend
         LIMIT 1
         """
     )
-    result = await db.execute(sql, {"cid": conversation_id})
-    row = result.mappings().first()
+    try:
+        result = await db.execute(sql, {"cid": conversation_id})
+        row = result.mappings().first()
+    except Exception:
+        row = None
     if not row:
         return []
 

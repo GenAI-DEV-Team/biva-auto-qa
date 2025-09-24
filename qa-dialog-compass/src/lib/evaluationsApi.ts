@@ -19,4 +19,11 @@ export async function runQAEvaluations(params: { conversation_ids?: string[]; li
   });
 }
 
+export async function updateEvaluationReview(conversationId: string, data: { reviewed?: boolean; review_note?: string | null }): Promise<EvaluationRecord> {
+  return apiFetch<EvaluationRecord>(`${API_V1}/evaluations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 

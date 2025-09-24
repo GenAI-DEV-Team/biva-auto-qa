@@ -1,6 +1,6 @@
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.engine import make_url
 from app.core.config import settings
 
@@ -59,8 +59,7 @@ read_engine = create_async_engine(
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 async_read_session = async_sessionmaker(read_engine, expire_on_commit=False)
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:

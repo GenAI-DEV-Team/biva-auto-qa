@@ -3,6 +3,8 @@ export interface EvaluationRecord {
   conversation_id: string;
   memory: Record<string, unknown>;
   evaluation_result: Record<string, unknown>;
+  reviewed: boolean;
+  review_note?: string | null;
 }
 
 export interface QARunResult {

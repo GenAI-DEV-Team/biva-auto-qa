@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Index
+import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship, validates
@@ -76,6 +77,9 @@ class Evaluation(Base):
     conversation_id = Column(Text, nullable=False, unique=True, index=True)
     memory = Column(JSONB, nullable=False, default=lambda: {})
     evaluation_result = Column(JSONB, nullable=False, default=lambda: {})
+    # Review metadata
+    reviewed = Column(sa.Boolean, nullable=False, server_default=sa.text("false"))
+    review_note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
 

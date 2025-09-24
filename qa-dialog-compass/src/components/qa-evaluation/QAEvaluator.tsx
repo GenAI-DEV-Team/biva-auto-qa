@@ -197,8 +197,8 @@ export function QAEvaluator({
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Evaluation Progress</span>
-              <span className="text-sm text-muted-foreground">
+              <span className="text-base font-semibold text-foreground">Evaluation Progress</span>
+              <span className="text-sm text-foreground/80">
                 {conversation.spans.filter(s => s.evaluation).length} / {conversation.spans.length} evaluated
               </span>
             </div>
@@ -232,10 +232,10 @@ export function QAEvaluator({
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center space-x-2">
-                        <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="text-sm">
                           {span.type}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-foreground/80">
                           {span.timestamp.toLocaleTimeString()}
                         </span>
                       </div>
@@ -249,7 +249,7 @@ export function QAEvaluator({
                       </div>
                     </div>
                     
-                    <p className="text-sm mb-2">{span.text}</p>
+                <p className="text-base leading-relaxed mb-2">{span.text}</p>
                     
                     {span.evaluation && span.evaluation.issues.length > 0 && (
                       <div className="flex flex-wrap gap-1">

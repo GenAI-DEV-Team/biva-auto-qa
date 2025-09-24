@@ -173,7 +173,7 @@ async def run_qa(
     1) Provide up to 20 legacy conversation_ids (body.conversation_ids)
     2) No IDs -> auto-pick latest `limit` call conversations from legacy DB
     """
-    # Gather conversations
+    # Gather conversations (enforce hard cap of 20)
     conversations: List[Dict[str, Any]] = []
     if body.conversation_ids:
         if len(body.conversation_ids) > 20:
@@ -183,7 +183,8 @@ async def run_qa(
             if row:
                 conversations.append(row)
     else:
-        conversations = await _fetch_conversations_auto(read_db, limit=body.limit)
+        limit = min(max(body.limit, 1), 20)
+        conversations = await _fetch_conversations_auto(read_db, limit=limit)
 
     if not conversations:
         raise HTTPException(status_code=404, detail="No conversations found to evaluate")
@@ -206,12 +207,24 @@ async def run_qa(
     tasks = [evaluate(c) for c in conversations]
     results = await asyncio.gather(*tasks)
 
+    # Utility: recursively strip PostgreSQL-invalid null bytes from strings
+    def _sanitize_for_pg(value: Any) -> Any:
+        if isinstance(value, str):
+            # Remove NUL bytes which Postgres cannot store in text/jsonb
+            return value.replace("\x00", "").replace("\u0000", "")
+        if isinstance(value, list):
+            return [_sanitize_for_pg(v) for v in value]
+        if isinstance(value, dict):
+            return {k: _sanitize_for_pg(v) for k, v in value.items()}
+        return value
+
     # Persist evaluations to write DB (upsert by conversation_id)
     for conv, res in zip(conversations, results):
         if not res.ok:
             continue
 
         conversation_id = res.conversation_id or (conv.get("conversation_id") or "")
+        conversation_id = _sanitize_for_pg(conversation_id)
         if not conversation_id:
             continue
 
@@ -227,6 +240,10 @@ async def run_qa(
         else:
             memory_json = raw_memory
 
+        # Sanitize memory and result payloads for Postgres
+        memory_json = _sanitize_for_pg(memory_json)
+        result_json = _sanitize_for_pg(res.result or {})
+
         # Upsert Evaluation by conversation_id
         existing_q = select(Evaluation).where(Evaluation.conversation_id == conversation_id)
         existing_res = await write_db.execute(existing_q)
@@ -234,12 +251,12 @@ async def run_qa(
 
         if existing:
             existing.memory = memory_json
-            existing.evaluation_result = res.result or {}
+            existing.evaluation_result = result_json
         else:
             eval_row = Evaluation(
                 conversation_id=conversation_id,
                 memory=memory_json,
-                evaluation_result=res.result or {},
+                evaluation_result=result_json,
             )
             write_db.add(eval_row)
 

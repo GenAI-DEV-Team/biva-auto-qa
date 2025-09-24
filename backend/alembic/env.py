@@ -1,58 +1,85 @@
-from logging.config import fileConfig
+import asyncio
 import os
 import sys
+from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, create_engine, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config, AsyncEngine
+from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+# --- Phần thiết lập đường dẫn để import từ ứng dụng chính ---
+# Thêm thư mục gốc của dự án vào sys.path để có thể import các module của app
+# ví dụ: from app.core.config import settings
+# Điều này giúp Alembic "nhìn thấy" các model và cấu hình của bạn.
+# -----------------------------------------------------------------
+# Lấy đường dẫn thư mục gốc của dự án (thư mục cha của thư mục 'alembic')
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.core.config import settings
+
+# --- Phần import model và cấu hình từ ứng dụng ---
+# Đây là phần quan trọng nhất cần cấu hình đúng.
+# -------------------------------------------------------
+# Import Base từ nơi bạn định nghĩa Declarative Base. Alembic dùng nó để
+# tự động phát hiện thay đổi trong các model (autogenerate).
 from app.core.db import Base
-import app.models.base  # ensure models are imported for autogenerate
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Ensure all model classes are imported so Base.metadata is populated
+# Alembic's autogenerate relies on metadata containing Table definitions
+import app.models.base  # noqa: F401
+
+# Import đối tượng settings để lấy URL của database.
+# Cách này giúp bạn quản lý cấu hình ở một nơi duy nhất.
+from app.core.config import settings
+
+
+# --- Cấu hình Alembic ---
+# -----------------------------
+# Lấy đối tượng config của Alembic từ context
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
+# Thiết lập logging từ file alembic.ini
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# Gán metadata của model cho Alembic để hỗ trợ 'autogenerate'
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+# --- Các hàm chạy Migration ---
+# --------------------------------
 
-def get_url():
-    return settings.DATABASE_URL.replace('postgresql+psycopg2', 'postgresql+asyncpg')
+def to_sync_driver_url(url: str) -> str:
+    """Convert async driver URLs to sync driver URLs for Alembic.
+
+    Alembic's online mode should use synchronous DBAPIs (e.g. psycopg2) when
+    running via create_engine(). If an async driver is supplied (e.g. asyncpg),
+    SQLAlchemy will attempt async I/O in a sync context and raise MissingGreenlet.
+
+    This function maps common async drivers to their sync equivalents:
+    - postgresql+asyncpg -> postgresql+psycopg2
+    - mysql+asyncmy      -> mysql+pymysql
+    - mariadb+asyncmy    -> mariadb+pymysql
+    """
+    lowered = url.lower()
+    if lowered.startswith("postgresql+asyncpg://"):
+        return "postgresql+psycopg2://" + url.split("://", 1)[1]
+    if lowered.startswith("mysql+asyncmy://"):
+        return "mysql+pymysql://" + url.split("://", 1)[1]
+    if lowered.startswith("mariadb+asyncmy://"):
+        return "mariadb+pymysql://" + url.split("://", 1)[1]
+    return url
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output, usually a SQL string.
+    """Chạy migration ở chế độ 'offline'.
+    Chế độ này tạo ra file SQL script thay vì chạy trực tiếp vào DB.
     """
-    url = get_url()
+    # Sử dụng trực tiếp URL từ settings, đảm bảo nó đã đúng định dạng
+    # Ensure a synchronous driver URL in offline mode as well
+    sync_url = to_sync_driver_url(settings.DATABASE_URL)
+    print(sync_url)
     context.configure(
-        url=url,
+        url=sync_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -63,37 +90,37 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    """Hàm chạy migration chính được gọi bởi run_migrations_online."""
     context.configure(connection=connection, target_metadata=target_metadata)
-
     with context.begin_transaction():
         context.run_migrations()
 
 
-async def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
+def run_migrations_online() -> None:
+    """Chạy migration ở chế độ 'online' (đồng bộ)."""
     configuration = config.get_section(config.config_ini_section)
-    configuration['sqlalchemy.url'] = get_url()
-    connectable: AsyncEngine = async_engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
+    sync_url = to_sync_driver_url(settings.DATABASE_URL)
+    configuration["sqlalchemy.url"] = sync_url
+    configuration["sqlalchemy.echo"] = "true"
+    print(sync_url)
+
+    connectable = create_engine(
+        configuration["sqlalchemy.url"],
         poolclass=pool.NullPool,
     )
 
-    async with connectable.connect() as connection:
-        # Set statement timeout to avoid long migrations
-        await connection.exec_driver_sql(f"SET statement_timeout = {settings.PG_STATEMENT_TIMEOUT_MS}")
-        await connection.run_sync(do_run_migrations)
+    with connectable.connect() as connection:
+        # Đặt statement timeout cho phiên làm việc
+        connection.execute(text(f"SET statement_timeout = {settings.PG_STATEMENT_TIMEOUT_MS}"))
 
-    await connectable.dispose()
+        do_run_migrations(connection)
+
+    connectable.dispose()
 
 
+# --- Logic chính ---
+# ---------------------
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    import asyncio
-    asyncio.run(run_migrations_online())
+    run_migrations_online()

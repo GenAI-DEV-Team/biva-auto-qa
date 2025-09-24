@@ -1,11 +1,16 @@
 import { useParams, Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConversation, listSpans } from "@/lib/conversationsApi";
-import { getEvaluation, runQAEvaluations } from "@/lib/evaluationsApi";
+import { getEvaluation, runQAEvaluations, updateEvaluationReview } from "@/lib/evaluationsApi";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 type ConversationDetailProps = {
   id?: string;
@@ -62,72 +67,84 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
     meta: { suppressToast: true },
   });
 
+  // Draft state for review; only save when clicking the save button
+  const [reviewedDraft, setReviewedDraft] = useState<boolean>(false);
+  const [reviewNoteDraft, setReviewNoteDraft] = useState<string>("");
+  useEffect(() => {
+    const rv = (evalData as any)?.reviewed ?? false;
+    const rn = (evalData as any)?.review_note ?? "";
+    setReviewedDraft(!!rv);
+    setReviewNoteDraft(rn ?? "");
+  }, [evalData]);
+
+  // Confirm dialog state for Run QA
+  const [runConfirmOpen, setRunConfirmOpen] = useState<boolean>(false);
+  const [runConfirmLoading, setRunConfirmLoading] = useState<boolean>(false);
+  const [isRunningQA, setIsRunningQA] = useState<boolean>(false);
+
+  // Auto-fetch audio on load/id change
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!id) return;
+      try {
+        setAudioLoading(true);
+        const url = await getAudioUrl(id);
+        if (!cancelled) setAudioUrl(url);
+      } finally {
+        if (!cancelled) setAudioLoading(false);
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold">Conversation {id}</div>
+        <div className="flex items-center gap-3">
+          <Button
+            variant={reviewedDraft ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => setReviewedDraft((v) => !v)}
+          >
+            {reviewedDraft ? "Đã review" : "Chưa review"}
+          </Button>
+          <div className="text-lg font-semibold">Conversation {id}</div>
+        </div>
         <div className="flex gap-2">
           <Link to="/">
             <Button variant="outline">Back</Button>
           </Link>
-          <Button
-            onClick={async () => {
-              if (!id) return;
-              try {
-                await runQAEvaluations({ conversation_ids: [id] });
-                await queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: id }] });
-                toast({ title: "QA started", description: "Evaluation will refresh when ready." });
-              } catch (e) {
-                const m = e instanceof Error ? e.message : "Failed to run QA";
-                toast({ title: "Run QA failed", description: m });
-              }
-            }}
-          >
-            Run QA
+          <Button onClick={() => setRunConfirmOpen(true)} disabled={isRunningQA}>
+            {isRunningQA ? "Đang chạy QA" : "Run QA"}
           </Button>
         </div>
       </div>
 
-      <Card className="p-4">
-        {convLoading ? (
-          <div className="text-sm text-muted-foreground">Loading conversation...</div>
-        ) : conv ? (
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div><span className="text-foreground">Conversation ID:</span> {conv.conversation_id ?? String(conv.id)}</div>
-            <div><span className="text-foreground">Customer phone:</span> {conv.customer_phone ?? "-"}</div>
-            <div><span className="text-foreground">Bot index:</span> {conv.bot_id ?? "-"}</div>
-            <div><span className="text-foreground">Created:</span> {conv.created_at ? new Date(conv.created_at).toLocaleString() : ""}</div>
-          </div>
-        ) : (
-          <div className="text-sm text-destructive">Conversation not found</div>
-        )}
-      </Card>
+      {convLoading ? (
+        <div className="text-sm text-muted-foreground">Loading conversation...</div>
+      ) : conv ? (
+        <></>
+      ) : (
+        <div className="text-sm text-destructive">Conversation not found</div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Card className="p-4">
-          <div className="text-sm font-medium mb-2">Audio</div>
-          <div className="flex items-center gap-2 mb-3">
-            <Button size="sm" variant="outline" disabled={!id || audioLoading} onClick={async () => {
-              if (!id) return;
-              try {
-                setAudioLoading(true);
-                const url = await getAudioUrl(id);
-                setAudioUrl(url);
-              } finally {
-                setAudioLoading(false);
-              }
-            }}>
-              {audioLoading ? "Đang tải audio..." : "Lấy & nghe audio"}
-            </Button>
-            {audioUrl && <span className="text-xs text-muted-foreground truncate" title={audioUrl}>{audioUrl}</span>}
+          <div className="text-base font-semibold mb-2 text-foreground">Audio</div>
+          <div className="mb-3">
+            {audioLoading && <div className="text-sm text-foreground/80">Đang tải audio...</div>}
+            {audioUrl && (
+              <div className="mb-4">
+                <audio controls src={audioUrl} className="w-full" />
+              </div>
+            )}
           </div>
-          {audioUrl && (
-            <div className="mb-4">
-              <audio controls src={audioUrl} className="w-full" />
-            </div>
-          )}
 
-          <div className="text-sm font-medium mb-2">Chat logs</div>
+          <div className="text-base font-semibold mb-2 text-foreground">Chat logs</div>
           {spansLoading ? (
             <div className="text-sm text-muted-foreground">Loading...</div>
           ) : spansError ? (
@@ -136,9 +153,9 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
             <div className="space-y-3 max-h-[60vh] overflow-auto">
               {(spans ?? []).map((s) => (
                 <div key={s.id} className={`flex ${s.role === "assistant" ? "justify-end" : s.role === "user" ? "justify-start" : "justify-center"}`}>
-                  <div className={`max-w-[75%] rounded-lg p-3 shadow-sm ${s.role === "assistant" ? "bg-primary text-primary-foreground rounded-br-lg" : s.role === "user" ? "bg-muted text-foreground rounded-bl-lg" : "bg-accent/30 text-foreground"}`}>
-                    <div className="mb-1 text-[11px] opacity-80">{s.role} • turn {s.turn_idx} • {new Date(s.created_at).toLocaleString()}</div>
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{s.text}</div>
+                  <div className={`max-w-[75%] rounded-lg p-3 shadow-sm ${s.role === "assistant" ? "bg-primary/15 text-foreground border border-primary/30 rounded-br-lg" : s.role === "user" ? "bg-muted text-foreground rounded-bl-lg" : "bg-accent/30 text-foreground"}`}>
+                    <div className="mb-1 text-xs text-foreground/80">{s.role} • turn {s.turn_idx} • {new Date(s.created_at).toLocaleString()}</div>
+                    <div className="whitespace-pre-wrap text-base leading-relaxed">{s.text}</div>
                   </div>
                 </div>
               ))}
@@ -147,14 +164,16 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
         </Card>
 
         <Card className="p-4 space-y-3">
-          <div className="text-sm font-medium">QA details</div>
+          <div className="text-base font-semibold text-foreground">QA details</div>
           {evalLoading ? (
-            <div className="text-sm text-muted-foreground">Loading...</div>
+            <div className="text-sm text-foreground/80">Loading...</div>
           ) : !evalData ? (
-            <div className="text-sm text-muted-foreground">No evaluation found.</div>
+            <div className="text-sm text-foreground/80">No evaluation found.</div>
           ) : (
             (() => {
               const er: any = (evalData as any).evaluation_result || {};
+              const reviewed = (evalData as any).reviewed ?? false;
+              const reviewNote = (evalData as any).review_note ?? "";
               const summary = er.summary || {};
               const overall: string = summary.overall ?? "";
               const highlights: string[] = Array.isArray(summary.highlights) ? summary.highlights : [];
@@ -170,18 +189,44 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                 return "bg-muted text-foreground";
               };
               return (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="text-sm font-semibold">Phần Nhận xét</div>
+                    <div className="space-y-1">
+                      <Label className="text-sm">Ghi chú</Label>
+                      <Textarea value={reviewNoteDraft} onChange={(e) => setReviewNoteDraft(e.target.value)} placeholder="Nhập ghi chú..." />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      onClick={async () => {
+                        try {
+                          // Always mark as reviewed on save
+                          if (!reviewedDraft) setReviewedDraft(true);
+                          await updateEvaluationReview(id!, { reviewed: true, review_note: reviewNoteDraft });
+                          await queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: id }] });
+                          await queryClient.invalidateQueries({ queryKey: ["evaluations"] });
+                          toast({ title: "Đã lưu review" });
+                        } catch (err) {
+                          const m = err instanceof Error ? err.message : "Lưu review thất bại";
+                          toast({ title: "Lỗi", description: m });
+                        }
+                      }}
+                    >
+                      Lưu
+                    </Button>
+                  </div>
+                  {/* <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 rounded text-xs ${getOverallClasses(overall)}`}>{overall || "n/a"}</span>
                     <div className="text-xs text-muted-foreground flex gap-2 flex-wrap">
                       {Object.entries(counts).map(([k, v]) => (
                         <span key={k} className="px-1.5 py-0.5 rounded bg-accent/40 text-foreground">{k}: {String(v)}</span>
                       ))}
                     </div>
-                  </div>
+                  </div> */}
                   {highlights.length > 0 && (
-                    <div className="text-xs">
-                      <div className="mb-1 text-muted-foreground">Highlights</div>
+                    <div className="text-sm">
+                      <div className="mb-1 text-foreground/80">Highlights</div>
                       <ul className="list-disc pl-4 space-y-1">
                         {highlights.map((h, i) => (
                           <li key={i} className="text-foreground">{h}</li>
@@ -189,7 +234,7 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                       </ul>
                     </div>
                   )}
-                  {Object.keys(stats).length > 0 && (
+                  {/* {Object.keys(stats).length > 0 && (
                     <div className="text-xs">
                       <div className="mb-1 text-muted-foreground">Stats</div>
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -201,18 +246,18 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                         ))}
                       </div>
                     </div>
-                  )}
+                  )} */}
                   {nhan_xet && (
-                    <div className="text-xs space-y-2">
+                    <div className="text-sm space-y-2">
                       {nhan_xet.topline && (
                         <div>
-                          <div className="mb-1 text-muted-foreground">Tổng quan</div>
+                          <div className="mb-1 text-foreground/80">Tổng quan</div>
                           <p className="text-foreground whitespace-pre-wrap leading-relaxed">{String(nhan_xet.topline)}</p>
                         </div>
                       )}
                       {Array.isArray(nhan_xet.strengths) && nhan_xet.strengths.length > 0 && (
                         <div>
-                          <div className="mb-1 text-muted-foreground">Điểm mạnh</div>
+                          <div className="mb-1 text-foreground/80">Điểm mạnh</div>
                           <ul className="list-disc pl-4 space-y-1">
                             {nhan_xet.strengths.map((s: string, i: number) => (
                               <li key={i} className="text-foreground">{s}</li>
@@ -222,7 +267,7 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                       )}
                       {Array.isArray(nhan_xet.issues) && nhan_xet.issues.length > 0 && (
                         <div>
-                          <div className="mb-1 text-muted-foreground">Vấn đề</div>
+                          <div className="mb-1 text-foreground/80">Vấn đề</div>
                           <ul className="list-disc pl-4 space-y-1">
                             {nhan_xet.issues.map((s: string, i: number) => (
                               <li key={i} className="text-foreground">{s}</li>
@@ -230,41 +275,76 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                           </ul>
                         </div>
                       )}
-                      {Array.isArray(nhan_xet.next_actions) && nhan_xet.next_actions.length > 0 && (
+                      {/* {Array.isArray(nhan_xet.next_actions) && nhan_xet.next_actions.length > 0 && (
                         <div>
-                          <div className="mb-1 text-muted-foreground">Hành động tiếp theo</div>
+                          <div className="mb-1 text-foreground/80">Hành động tiếp theo</div>
                           <ul className="list-disc pl-4 space-y-1">
                             {nhan_xet.next_actions.map((s: string, i: number) => (
                               <li key={i} className="text-foreground">{s}</li>
                             ))}
                           </ul>
                         </div>
-                      )}
+                      )} */}
                     </div>
                   )}
-                  {errors.length > 0 && (
-                    <div className="text-xs">
-                      <div className="mb-1 text-muted-foreground">Errors ({errors.length})</div>
+                  {/* {errors.length > 0 && (
+                    <div className="text-sm">
+                      <div className="mb-1 text-foreground/80">Errors ({errors.length})</div>
                       <div className="space-y-2">
                         {errors.map((e, i) => (
                           <div key={i} className="rounded border border-border p-2">
-                            <div className="mb-1 text-muted-foreground">turn {e.turn} • {e.type} • {e.severity}</div>
-                            {e.suggestion && <div className="text-foreground whitespace-pre-wrap">{e.suggestion}</div>}
+                            <div className="mb-1 text-foreground/80">turn {e.turn} • {e.type} • {e.severity}</div>
+                            {e.suggestion && <div className="text-foreground whitespace-pre-wrap leading-relaxed">{e.suggestion}</div>}
                           </div>
                         ))}
                       </div>
                     </div>
-                  )}
-                  <details className="rounded border border-border p-2">
+                  )} */}
+                  {/* <details className="rounded border border-border p-2">
                     <summary className="text-xs cursor-pointer text-muted-foreground">Raw</summary>
                     <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(er, null, 2)}</pre>
-                  </details>
+                  </details> */}
                 </div>
               );
             })()
           )}
         </Card>
       </div>
+      {id && (
+        <Dialog open={runConfirmOpen} onOpenChange={(open) => !runConfirmLoading && setRunConfirmOpen(open)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Xác nhận chạy QA</DialogTitle>
+            </DialogHeader>
+            <div className="text-sm text-muted-foreground">Bạn có chắc muốn chạy QA cho hội thoại {id}?</div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRunConfirmOpen(false)} disabled={runConfirmLoading}>Hủy</Button>
+              <Button
+                onClick={async () => {
+                  if (!id) return;
+                  setRunConfirmLoading(true);
+                  setRunConfirmOpen(false);
+                  setIsRunningQA(true);
+                  try {
+                    await runQAEvaluations({ conversation_ids: [id] });
+                    await queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: id }] });
+                    toast({ title: "QA started", description: "Evaluation will refresh when ready." });
+                  } catch (e) {
+                    const m = e instanceof Error ? e.message : "Failed to run QA";
+                    toast({ title: "Run QA failed", description: m });
+                  } finally {
+                    setRunConfirmLoading(false);
+                    setIsRunningQA(false);
+                  }
+                }}
+                disabled={runConfirmLoading}
+              >
+                {runConfirmLoading ? "Đang chạy..." : "Run"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };
