@@ -20,10 +20,10 @@ import { listBots, createBotByLegacyIndex, regenerateKnowledgeBase } from "@/lib
 import type { BotResponse } from "@/types/bots";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { listConversations, listSpans } from "@/lib/conversationsApi";
+import { listConversations, listSpans, getConversation } from "@/lib/conversationsApi";
 import { getEvaluation, runQAEvaluations } from "@/lib/evaluationsApi";
 import type { EvaluationRecord } from "@/types/evaluations";
-import type { SpanResponse } from "@/types/conversations";
+import type { SpanResponse, ConversationResponse } from "@/types/conversations";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -42,6 +42,9 @@ const Index = () => {
   const [qaRunningId, setQaRunningId] = useState<string | null>(null);
   const [convPage, setConvPage] = useState<number>(1);
   const pageSize = 20;
+  const [convIdSearch, setConvIdSearch] = useState<string>("");
+  const [isSearchingConvId, setIsSearchingConvId] = useState<boolean>(false);
+  const [pinnedConv, setPinnedConv] = useState<ConversationResponse | null>(null);
   
   // Mock data
   const conversations = generateMockConversations();
@@ -531,6 +534,75 @@ const Index = () => {
                       </Select>
                       <Button variant="outline" onClick={() => { setConvPage(1); refetchConversations(); }}>Apply</Button>
                     </div>
+                    <div className="flex items-center gap-3 mb-4">
+                      <Input
+                        placeholder="Conversation ID"
+                        value={convIdSearch}
+                        onChange={(e) => setConvIdSearch(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            try {
+                              if (!convIdSearch.trim()) return;
+                              setIsSearchingConvId(true);
+                              const conv = await getConversation(convIdSearch.trim());
+                              setActiveConversationId(convIdSearch.trim());
+                              setPinnedConv(conv);
+                              setConvPage(1);
+                              toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} loaded` });
+                            } catch (err) {
+                              const m = err instanceof Error ? err.message : "Conversation not found";
+                              toast({ title: "Load failed", description: m });
+                            } finally {
+                              setIsSearchingConvId(false);
+                            }
+                          }
+                        }}
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={isSearchingConvId || !convIdSearch.trim()}
+                        onClick={async () => {
+                          try {
+                            if (!convIdSearch.trim()) return;
+                            setIsSearchingConvId(true);
+                            const conv = await getConversation(convIdSearch.trim());
+                            setActiveConversationId(convIdSearch.trim());
+                            setPinnedConv(conv);
+                            setConvPage(1);
+                            toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} loaded` });
+                          } catch (err) {
+                            const m = err instanceof Error ? err.message : "Conversation not found";
+                            toast({ title: "Load failed", description: m });
+                          } finally {
+                            setIsSearchingConvId(false);
+                          }
+                        }}
+                      >
+                        {isSearchingConvId ? "Loading..." : "Load"}
+                      </Button>
+                      <Button
+                        onClick={async () => {
+                          const cid = convIdSearch.trim();
+                          if (!cid) return;
+                          try {
+                            setQaRunningId(cid);
+                            await runQAEvaluations({ conversation_ids: [cid] });
+                            await queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: cid }] });
+                            toast({ title: "QA run started", description: "Evaluation will refresh when ready." });
+                          } catch (err) {
+                            const m = err instanceof Error ? err.message : "Failed to run QA";
+                            toast({ title: "Run QA failed", description: m });
+                          } finally {
+                            setQaRunningId(null);
+                          }
+                        }}
+                        disabled={!convIdSearch.trim() || qaRunningId === convIdSearch.trim()}
+                      >
+                        {qaRunningId === convIdSearch.trim() ? "Running..." : "Run QA"}
+                      </Button>
+                    </div>
                   </div>
                   <ScrollArea className="flex-1 pr-2">
                     {conversationsLoading && (
@@ -545,13 +617,19 @@ const Index = () => {
                           <div className="text-sm text-muted-foreground">No conversations found.</div>
                         )}
                         {(() => {
-                          const all = (conversationsData ?? [])
+                          let all = (conversationsData ?? [])
                             .filter((c) => (convPhoneFilter.trim() ? (c.customer_phone || "").includes(convPhoneFilter.trim()) : true))
                             .sort((a, b) => {
                               const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
                               const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
                               return convSortDir === "desc" ? tb - ta : ta - tb;
                             });
+
+                          // Pin the searched conversation to the top if available
+                          if (pinnedConv) {
+                            const pid = pinnedConv.conversation_id ?? String(pinnedConv.id);
+                            all = [pinnedConv, ...all.filter((c) => (c.conversation_id ?? String(c.id)) !== pid)];
+                          }
                           const totalPages = Math.max(1, Math.ceil(all.length / pageSize));
                           const currentPage = Math.min(convPage, totalPages);
                           const start = (currentPage - 1) * pageSize;
