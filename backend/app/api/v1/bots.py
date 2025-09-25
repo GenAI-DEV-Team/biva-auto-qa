@@ -130,17 +130,13 @@ async def list_bots(limit: int = Query(100, ge=1, le=1000), db: AsyncSession = D
     """List all bots"""
     redis = await get_redis()
     cache_key = f"bots:list:{limit}"
-    cached = await redis.get(cache_key)
-    if cached:
-        try:
-            data = json.loads(cached)
-            return [BotResponse(**x) for x in data]
-        except Exception:
-            pass
 
+    # Check database first, then cache
     query = select(Bot).order_by(Bot.created_at.desc()).limit(limit)
     result = await db.execute(query)
     bots = result.scalars().all()
+
+    logger.info(f"Database query returned {len(bots)} bots")
 
     payload = [
         BotResponse(
@@ -151,12 +147,91 @@ async def list_bots(limit: int = Query(100, ge=1, le=1000), db: AsyncSession = D
         )
         for bot in bots
     ]
+
+    # Only cache if we have data
+    if payload:
+        try:
+            await redis.setex(cache_key, 86400, json.dumps([p.dict() for p in payload]))
+            logger.info(f"Cached {len(payload)} bots with key {cache_key}")
+        except Exception as e:
+            logger.warning(f"Failed to cache bots: {e}")
+
+    # Check if there's stale cache data
     try:
-        # Bots TTL: 1 day
-        await redis.setex(cache_key, 86400, json.dumps([p.dict() for p in payload]))
-    except Exception:
-        pass
+        cached = await redis.get(cache_key)
+        if cached:
+            try:
+                cached_data = json.loads(cached)
+                if len(cached_data) != len(payload):
+                    logger.warning(f"Cache inconsistency: cached={len(cached_data)}, actual={len(payload)}")
+                    # Delete stale cache
+                    await redis.delete(cache_key)
+                    logger.info(f"Deleted stale cache key: {cache_key}")
+            except Exception as e:
+                logger.warning(f"Cache data corruption for {cache_key}: {e}")
+                await redis.delete(cache_key)
+    except Exception as e:
+        logger.warning(f"Cache check failed: {e}")
+
     return payload
+
+@router.delete("/cache", summary="Clear bots cache", description="Clear all cached bot data")
+async def clear_bots_cache():
+    """Clear all cached bot data"""
+    redis = await get_redis()
+    try:
+        # Get all bot cache keys
+        keys = await redis.keys("bots:list:*")
+        if keys:
+            await redis.delete(*keys)
+            logger.info(f"Cleared {len(keys)} bot cache keys")
+            return {"message": f"Cleared {len(keys)} cache entries", "cleared_keys": keys}
+        else:
+            return {"message": "No cache keys found"}
+    except Exception as e:
+        logger.error(f"Failed to clear cache: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear cache")
+
+@router.get("/debug", summary="Debug bots data", description="Debug endpoint to check database and cache state")
+async def debug_bots(db: AsyncSession = Depends(get_db)):
+    """Debug endpoint to check database and cache state"""
+    redis = await get_redis()
+
+    # Check database
+    query = select(Bot).order_by(Bot.created_at.desc())
+    result = await db.execute(query)
+    bots = result.scalars().all()
+
+    # Check cache
+    cache_keys = await redis.keys("bots:list:*")
+    cache_info = {}
+    for key in cache_keys:
+        try:
+            cached = await redis.get(key)
+            if cached:
+                data = json.loads(cached)
+                cache_info[key] = len(data)
+        except Exception:
+            cache_info[key] = "corrupted"
+
+    return {
+        "database": {
+            "total_bots": len(bots),
+            "bots": [
+                {
+                    "id": str(bot.id),
+                    "index": bot.bot_index,
+                    "name": bot.name,
+                    "created_at": bot.created_at.isoformat()
+                }
+                for bot in bots[:5]  # Show first 5
+            ]
+        },
+        "cache": {
+            "keys": cache_keys,
+            "info": cache_info
+        }
+    }
 
 @router.get(
     "/{bot_id}",
