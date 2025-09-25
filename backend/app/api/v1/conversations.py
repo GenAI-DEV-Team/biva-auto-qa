@@ -5,9 +5,13 @@ from typing import List, Optional
 from pydantic import BaseModel
 from app.core.db import get_read_db, get_db
 from app.services.legacy_queries import fetch_conversations_time_range
+from app.models.base import Evaluation
 from datetime import datetime
 import json
+import logging
 from app.core.redis import get_redis
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -35,18 +39,22 @@ async def list_conversations(
     start_ts: Optional[str] = None,
     end_ts: Optional[str] = None,
     phone_like: Optional[str] = None,
+    qa_status: Optional[str] = None,  # "qa", "notqa", or None
     limit: int = 50,
     offset: int = 0,
-    db: AsyncSession = Depends(get_read_db)
+    db: AsyncSession = Depends(get_read_db),
+    write_db: AsyncSession = Depends(get_db)
 ):
     """List conversations from read DB with filters. Only returns CALLs (exclude chats).
 
     - bot_id: legacy bot id (int)
     - start_ts, end_ts: ISO timestamps or DB-compatible datetime strings
+    - phone_like: phone number search pattern
+    - qa_status: "qa" (has evaluation), "notqa" (no evaluation), or None (all)
     - limit: max rows
     """
     # Try cache first
-    cache_key = f"conv:list:{bot_id}:{start_ts}:{end_ts}:{phone_like}:{limit}:{offset}"
+    cache_key = f"conv:list:{bot_id}:{start_ts}:{end_ts}:{phone_like}:{qa_status}:{limit}:{offset}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
@@ -56,7 +64,8 @@ async def list_conversations(
         except Exception:
             pass
 
-    # Fetch only CALL type rows at SQL level to honor pagination semantics
+    # Base SQL query for conversations (from read DB)
+    # Note: QA status filtering will be handled in Python after joining with evaluations
     sql = text(
         """
         SELECT
@@ -82,22 +91,58 @@ async def list_conversations(
         "start_ts": start_ts,
         "end_ts": end_ts,
         "phone_like": (f"%{phone_like}%" if phone_like else None),
+        "qa_status": qa_status,
         "limit": limit,
         "offset": offset,
     }
     result = await db.execute(sql, params)
     calls = result.mappings().all()
-    payload = [
-        ConversationResponse(
-            id=r["id"],
-            conversation_id=r["conversation_id"],
-            customer_phone=r["customer_phone"],
-            bot_id=r["bot_id"],
-            created_at=r["created_at"],
-            updated_at=r["updated_at"],
+
+    # Get conversation IDs to query evaluations from write DB
+    conversation_ids = [call["conversation_id"] for call in calls if call["conversation_id"]]
+
+    # Query evaluations from write DB
+    evaluations_map = {}
+    if conversation_ids:
+        try:
+            # Query evaluations for these conversation IDs from write DB
+            eval_query = select(Evaluation).where(Evaluation.conversation_id.in_(conversation_ids))
+            eval_result = await write_db.execute(eval_query)
+            evaluations = eval_result.scalars().all()
+
+            # Create a map of conversation_id -> evaluation
+            for eval in evaluations:
+                evaluations_map[eval.conversation_id] = eval
+        except Exception as e:
+            logger.warning(f"Could not fetch evaluations from write DB: {e}")
+            # Continue without evaluations
+
+    # Create payload with evaluation data and apply QA status filtering
+    payload = []
+    for r in calls:
+        conv_id = r["conversation_id"]
+        evaluation = evaluations_map.get(conv_id)
+
+        # Apply QA status filtering
+        if qa_status:
+            has_evaluation = evaluation is not None
+            if qa_status == "qa" and not has_evaluation:
+                continue  # Skip conversations without evaluations
+            elif qa_status == "notqa" and has_evaluation:
+                continue  # Skip conversations with evaluations
+
+        payload.append(
+            ConversationResponse(
+                id=r["id"],
+                conversation_id=conv_id,
+                customer_phone=r["customer_phone"],
+                bot_id=r["bot_id"],
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+                # Note: We would need to extend ConversationResponse to include evaluation fields
+                # For now, just include basic data
+            )
         )
-        for r in calls
-    ]
     try:
         # Conversations TTL: 5 hours
         await redis.setex(cache_key, 5 * 60 * 60, json.dumps([p.dict() for p in payload]))

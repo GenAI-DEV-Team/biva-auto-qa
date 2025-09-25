@@ -26,10 +26,10 @@ app = FastAPI(
 # Set up CORS using settings
 def parse_csv(value: str | None) -> list[str] | str:
     if value is None:
-        return "*"
+        return ["http://localhost:8080", "http://localhost:3000", "http://127.0.0.1:8080", "http://127.0.0.1:3000"]
     value = value.strip()
     if value == "*" or value == "":
-        return "*"
+        return ["http://localhost:8080", "http://localhost:3000", "http://127.0.0.1:8080", "http://127.0.0.1:3000"]
     return [v.strip() for v in value.split(",") if v.strip()]
 
 allow_origins = parse_csv(settings.CORS_ALLOW_ORIGINS)
@@ -38,10 +38,10 @@ allow_headers = parse_csv(settings.CORS_ALLOW_HEADERS)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allow_origins if isinstance(allow_origins, list) else ["*"],
-    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-    allow_methods=allow_methods if isinstance(allow_methods, list) else ["*"],
-    allow_headers=allow_headers if isinstance(allow_headers, list) else ["*"],
+    allow_origins=allow_origins,
+    allow_credentials=True,  # Always allow credentials for auth
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Include API router

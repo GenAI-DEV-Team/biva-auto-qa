@@ -52,4 +52,8 @@ class Settings(BaseSettings):
     REDIS_HEALTHCHECK_SEC: int = 30
     REDIS_SOCKET_TIMEOUT_SEC: int = 5
 
+    # Google Sheet
+    GOOGLE_SHEET_CREDENTIALS_PATH: str
+    GOOGLE_SHEET_SPREADSHEET_ID: str
+
 settings = Settings()

@@ -113,7 +113,7 @@ services:
       backend:
         condition: service_started
     ports:
-      - "8080:80"
+      - "80:80"
     volumes:
       - ./qa-dialog-compass/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
