@@ -15,9 +15,11 @@ import { QAEvaluator } from "@/components/qa-evaluation/QAEvaluator";
 import { ConversationAnalysis, SpanEvaluation } from "@/types/qa";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listBots, createBotByLegacyIndex, regenerateKnowledgeBase } from "@/lib/botsApi";
+import { useAutoRefresh, useQACompletionRefresh } from "@/hooks/use-auto-refresh";
 import type { BotResponse } from "@/types/bots";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
+import { AutoRefreshIndicator } from "@/components/ui/auto-refresh-indicator";
 import { listConversations, listSpans, getConversation } from "@/lib/conversationsApi";
 import { getEvaluation, runQAEvaluations, listEvaluations, updateEvaluationReview } from "@/lib/evaluationsApi";
 import { getSheetsList, getConversationsForSheets, updateGoogleSheets, type SheetInfo, type ConversationRow, type UpdateRequest } from "@/lib/sheetsApi";
@@ -131,6 +133,17 @@ const Index = () => {
   // Simplified home — no heavy charts/hero; quick actions only
 
   const queryClient = useQueryClient();
+  const { refreshAfterQA } = useQACompletionRefresh();
+
+  const handleRefreshAfterQA = async (conversationIds: string[]) => {
+    setIsAutoRefreshing(true);
+    try {
+      await refreshAfterQA(conversationIds);
+      setLastUpdate(new Date());
+    } finally {
+      setIsAutoRefreshing(false);
+    }
+  };
   const { data: botsData, isLoading: botsLoading, isError: botsError, error: botsErrorObj, refetch: refetchBots } = useQuery({
     queryKey: ["bots", { limit: 100 }],
     queryFn: () => listBots({ limit: 100 }),
@@ -172,6 +185,10 @@ const Index = () => {
   const [clientPage, setClientPage] = useState<number>(1);
   const clientPageSize = 20;
 
+  // Auto refresh state
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+
   // Get ALL conversations for client-side filtering and pagination
   // Backend filters: bot_id, time range, phone_like, qa_status (basic + QA filters)
   // Frontend filters: review status, overall rating (remaining complex filters)
@@ -193,8 +210,9 @@ const Index = () => {
       offset: 0,
     }),
     enabled: activeTab === "conversations",
-    staleTime: 5 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
+    staleTime: 1 * 60 * 1000, // Reduce stale time to 1 minute for auto refresh
+    gcTime: 5 * 60 * 1000, // Reduce gc time to 5 minutes
+    refetchInterval: activeTab === "conversations" ? 60000 : false, // Poll every 60s when on conversations tab
   });
 
   // Get paginated conversations for server-side pagination (keeping for compatibility)
@@ -248,8 +266,9 @@ const Index = () => {
     queryKey: ["evaluations", { limit: 200 }],
     queryFn: () => listEvaluations(200),
     enabled: activeTab === "conversations",
-    staleTime: 2 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    staleTime: 30 * 1000, // Reduce to 30 seconds for faster refresh
+    gcTime: 5 * 60 * 1000,
+    refetchInterval: activeTab === "conversations" ? 30000 : false, // Poll every 30s when on conversations tab
   });
   const evalMap = useMemo(() => {
     const m = new Map<string, EvaluationRecord>();
@@ -947,6 +966,11 @@ const Index = () => {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-2">
                       <div className="flex items-center gap-2">
                         <h2 className="text-lg sm:text-xl font-bold text-foreground">Conversations</h2>
+                        <AutoRefreshIndicator
+                          isRefreshing={isAutoRefreshing || conversationsLoading}
+                          lastUpdate={lastUpdate}
+                          className="ml-2"
+                        />
                       </div>
                     </div>
                     {conversationsBotFilter != null && (
@@ -1709,14 +1733,16 @@ const Index = () => {
                     try {
                       setQaRunningIds((s) => { const n = new Set(s); ids.forEach((id) => n.add(id)); return n; });
                       await runQAEvaluations({ conversation_ids: ids });
-                      await Promise.all(ids.map((id) => queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: id }] })));
-                      await queryClient.invalidateQueries({ queryKey: ["evaluations"] });
+
+                      // Use the new refresh hook for comprehensive updates
+                      await handleRefreshAfterQA(ids);
+
                       setQaOverrideSummary((prev) => {
                         const n = new Map(prev);
                         ids.forEach((id) => n.set(id, "updated"));
                         return n;
                       });
-                      toast({ title: "QA started", description: `Đang chạy QA cho ${ids.length} hội thoại` });
+                      toast({ title: "QA started", description: `Đang chạy QA cho ${ids.length} hội thoại. UI sẽ tự động cập nhật khi hoàn thành.` });
                     } catch (err) {
                       const m = err instanceof Error ? err.message : "Failed to run QA";
                       toast({ title: "Run QA failed", description: m });

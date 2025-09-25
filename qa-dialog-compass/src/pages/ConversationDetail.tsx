@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConversation, listSpans } from "@/lib/conversationsApi";
 import { getEvaluation, runQAEvaluations, updateEvaluationReview } from "@/lib/evaluationsApi";
+import { useQACompletionRefresh } from "@/hooks/use-auto-refresh";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
@@ -20,6 +21,7 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
   const { id: routeId } = useParams<{ id: string }>();
   const id = idProp ?? routeId;
   const queryClient = useQueryClient();
+  const { refreshAfterQA } = useQACompletionRefresh();
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState<boolean>(false);
   const getAudioUrl = async (cid: string): Promise<string | null> => {
@@ -65,6 +67,9 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
     enabled: !!id,
     // Don't error toast on 404
     meta: { suppressToast: true },
+    staleTime: 30 * 1000, // Reduce to 30 seconds for faster refresh
+    gcTime: 5 * 60 * 1000,
+    refetchInterval: !!id ? 30000 : false, // Poll every 30s
   });
 
   // Draft state for review; only save when clicking the save button
@@ -327,8 +332,11 @@ const ConversationDetail = ({ id: idProp }: ConversationDetailProps) => {
                   setIsRunningQA(true);
                   try {
                     await runQAEvaluations({ conversation_ids: [id] });
-                    await queryClient.invalidateQueries({ queryKey: ["evaluation", { conversation_id: id }] });
-                    toast({ title: "QA started", description: "Evaluation will refresh when ready." });
+
+                    // Use the new refresh hook for comprehensive updates
+                    await refreshAfterQA([id]);
+
+                    toast({ title: "QA started", description: "Evaluation sẽ tự động cập nhật khi hoàn thành." });
                   } catch (e) {
                     const m = e instanceof Error ? e.message : "Failed to run QA";
                     toast({ title: "Run QA failed", description: m });
