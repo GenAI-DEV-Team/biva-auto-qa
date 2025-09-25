@@ -55,6 +55,7 @@ const Index = () => {
   const [isSearchingConvId, setIsSearchingConvId] = useState<boolean>(false);
   const [convPageInput, setConvPageInput] = useState<string>("");
   const [searchInput, setSearchInput] = useState<string>("");
+  const [botNameSearch, setBotNameSearch] = useState<string>("");
 
   // Debounced search input for performance
   const [debouncedSearchInput, setDebouncedSearchInput] = useState<string>("");
@@ -64,7 +65,24 @@ const Index = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
-  const [pinnedConv, setPinnedConv] = useState<ConversationResponse | null>(null);
+
+  // Debounced conversation ID search input for performance
+  const [debouncedConvIdSearch, setDebouncedConvIdSearch] = useState<string>("");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedConvIdSearch(convIdSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [convIdSearch]);
+
+  // Debounced bot name search input for performance
+  const [debouncedBotNameSearch, setDebouncedBotNameSearch] = useState<string>("");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedBotNameSearch(botNameSearch);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [botNameSearch]);
   const [qaFilter, setQaFilter] = useState<"all" | "qa" | "notqa">("all");
   const [overallFilter, setOverallFilter] = useState<"all" | "good" | "warn" | "bad" | "other">("all");
   const [reviewFilter, setReviewFilter] = useState<"all" | "reviewed" | "notreviewed">("all");
@@ -74,6 +92,7 @@ const Index = () => {
   const [confirmLoading, setConfirmLoading] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [filtersOpen, setFiltersOpen] = useState<boolean>(false);
+  const [advancedSearchOpen, setAdvancedSearchOpen] = useState<boolean>(false);
   const [regenOpen, setRegenOpen] = useState<boolean>(false);
   const [regenTargetIndex, setRegenTargetIndex] = useState<number | null>(null);
   const [regenLoading, setRegenLoading] = useState<boolean>(false);
@@ -85,6 +104,20 @@ const Index = () => {
   const [sheetsLoading, setSheetsLoading] = useState<boolean>(false);
   const [updateLoading, setUpdateLoading] = useState<boolean>(false);
   
+  // —— Phone number helpers ——
+  const formatPhoneNumber = (phone: string) => {
+    if (!phone) return phone;
+    // Remove all non-digit characters
+    const cleaned = phone.replace(/\D/g, '');
+    // Format Vietnamese phone numbers
+    if (cleaned.length === 9) {
+      return cleaned.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+    } else if (cleaned.length === 10) {
+      return cleaned.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3');
+    }
+    return phone;
+  };
+
   // —— Timezone helpers (TZ+7 Asia/Ho_Chi_Minh) ——
   const TZ7 = "Asia/Ho_Chi_Minh";
   const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -138,14 +171,14 @@ const Index = () => {
   const handleRefreshAfterQA = async (conversationIds: string[]) => {
     try {
       // Force re-render immediately
-      setEvalDataVersion(prev => prev + 1);
+      setEvaluationDataVersion(prev => prev + 1);
 
       // Force refresh evaluations multiple times for reliability
-      await refetchEvals(); // First refresh
+      await refetchEvaluations(); // First refresh
       await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
-      await refetchEvals(); // Second refresh
+      await refetchEvaluations(); // Second refresh
       await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
-      await refetchEvals(); // Third refresh
+      await refetchEvaluations(); // Third refresh
     } catch (error) {
       console.error(`Error during QA completion refresh:`, error);
     }
@@ -156,7 +189,7 @@ const Index = () => {
   const handleManualRefresh = async () => {
     try {
       // Force refresh evaluations
-      await refetchEvals();
+      await refetchEvaluations();
 
       // Invalidate all relevant queries
       await queryClient.invalidateQueries({ queryKey: ["evaluations"] });
@@ -208,7 +241,7 @@ const Index = () => {
   const [clientPage, setClientPage] = useState<number>(1);
   const clientPageSize = 20;
 
-  const [evalDataVersion, setEvalDataVersion] = useState(0); // Force re-render when evaluations update
+  const [evaluationDataVersion, setEvaluationDataVersion] = useState(0); // Force re-render when evaluations update
 
   // Get ALL conversations for client-side filtering and pagination
   // Backend filters: bot_id, time range, phone_like, qa_status (basic + QA filters)
@@ -219,6 +252,8 @@ const Index = () => {
       start_ts: convStartTs || undefined,
       end_ts: convEndTs || undefined,
       phone_like: debouncedSearchInput || undefined,
+      conversation_id_like: debouncedConvIdSearch || undefined,
+      bot_name_like: debouncedBotNameSearch || undefined,
       qa_status: qaFilter === "all" ? null : qaFilter // Send QA filter to backend
     }],
     queryFn: () => listConversations({
@@ -226,6 +261,8 @@ const Index = () => {
       start_ts: convStartTs || undefined,
       end_ts: convEndTs || undefined,
       phone_like: debouncedSearchInput || undefined,
+      conversation_id_like: debouncedConvIdSearch || undefined,
+      bot_name_like: debouncedBotNameSearch || undefined,
       qa_status: qaFilter === "all" ? null : qaFilter, // Send QA filter to backend
       limit: 1000, // Get up to 1000 conversations for client-side filtering
       offset: 0,
@@ -242,6 +279,9 @@ const Index = () => {
       bot_id: conversationsBotFilter,
       start_ts: convStartTs || undefined,
       end_ts: convEndTs || undefined,
+      phone_like: debouncedSearchInput || undefined,
+      conversation_id_like: debouncedConvIdSearch || undefined,
+      bot_name_like: debouncedBotNameSearch || undefined,
       qa_status: qaFilter === "all" ? null : qaFilter,
       limit: clientPageSize,
       offset: (clientPage - 1) * clientPageSize
@@ -251,6 +291,8 @@ const Index = () => {
       start_ts: convStartTs || undefined,
       end_ts: convEndTs || undefined,
       phone_like: debouncedSearchInput || undefined,
+      conversation_id_like: debouncedConvIdSearch || undefined,
+      bot_name_like: debouncedBotNameSearch || undefined,
       qa_status: qaFilter === "all" ? null : qaFilter, // Send QA filter to backend
       limit: clientPageSize,
       offset: (clientPage - 1) * clientPageSize,
@@ -271,9 +313,9 @@ const Index = () => {
   // Reset to first page when any filter changes
   useEffect(() => {
     setClientPage(1);
-  }, [qaFilter, reviewFilter, overallFilter, conversationsBotFilter, convStartTs, convEndTs, convPhoneFilter, convSortDir, debouncedSearchInput]);
+  }, [qaFilter, reviewFilter, overallFilter, conversationsBotFilter, convStartTs, convEndTs, convPhoneFilter, convSortDir, debouncedSearchInput, debouncedConvIdSearch, debouncedBotNameSearch]);
 
-  const { data: evalData, isLoading: evalLoading, isError: evalError } = useQuery({
+  const { data: evaluationData, isLoading: evaluationLoading, isError: evaluationError } = useQuery({
     queryKey: ["evaluation", { conversation_id: activeConversationId }],
     queryFn: () => getEvaluation(activeConversationId as string),
     enabled: activeTab === "conversations" && !!activeConversationId,
@@ -284,7 +326,7 @@ const Index = () => {
 
   // Recent evaluations for QA summaries and filtering
   // Query for evaluations with aggressive polling
-  const { data: evalsData, refetch: refetchEvals } = useQuery({
+  const { data: evaluationsData, refetch: refetchEvaluations } = useQuery({
     queryKey: ["evaluations", { limit: 200 }],
     queryFn: () => listEvaluations(200),
     enabled: activeTab === "conversations",
@@ -293,20 +335,20 @@ const Index = () => {
     refetchInterval: activeTab === "conversations" ? 1000 : false, // Poll every 1s when on conversations tab
     refetchIntervalInBackground: true, // Keep polling even when tab is not active
   });
-  const evalMap = useMemo(() => {
+  const evaluationMap = useMemo(() => {
     const m = new Map<string, EvaluationRecord>();
-    for (const e of evalsData ?? []) m.set(e.conversation_id, e);
+    for (const e of evaluationsData ?? []) m.set(e.conversation_id, e);
     return m;
-  }, [evalsData, qaRunningIds, evalDataVersion]);
+  }, [evaluationsData, qaRunningIds, evaluationDataVersion]);
 
   // Monitor evaluations data changes and force re-render
   useEffect(() => {
-    if (evalsData) {
-      setEvalDataVersion(prev => prev + 1);
+    if (evaluationsData) {
+      setEvaluationDataVersion(prev => prev + 1);
     }
-  }, [evalsData]);
+  }, [evaluationsData]);
 
-  // Client-side filtering and pagination logic (moved after evalMap definition)
+  // Client-side filtering and pagination logic (moved after evaluationMap definition)
   // This provides real-time filtering as user changes filters
   const { filteredConversations, totalPages, totalFiltered } = useMemo(() => {
     if (!allConversationsData) {
@@ -317,7 +359,7 @@ const Index = () => {
     // QA status filter is now handled by backend, so only review and overall filters remain
     const filtered = allConversationsData.filter((conv) => {
       const convId = conv.conversation_id ?? String(conv.id);
-      const rec = evalMap.get(convId);
+      const rec = evaluationMap.get(convId);
       const hasEvaluation = !!rec;
 
       // Apply review filter (frontend filter)
@@ -354,7 +396,7 @@ const Index = () => {
       totalPages: Math.max(1, Math.ceil(sorted.length / clientPageSize)),
       totalFiltered: sorted.length
     };
-  }, [allConversationsData, evalMap, qaFilter, reviewFilter, overallFilter, clientPage, clientPageSize, convSortDir]);
+  }, [allConversationsData, evaluationMap, qaFilter, reviewFilter, overallFilter, clientPage, clientPageSize, convSortDir]);
 
 
   // Use filtered data for display
@@ -441,16 +483,16 @@ const Index = () => {
         sheet_name: sheetName,
         records: selectedConversations.map(conv => {
           const convId = conv.conversation_id ?? String(conv.id);
-          const evalObj: any = evalMap.get(convId)?.evaluation_result || null;
+          const evaluationObj: any = evaluationMap.get(convId)?.evaluation_result || null;
 
           // Get detailed note from evaluation
           const getDetailedNote = () => {
-            if (!evalObj) return "Chưa có đánh giá";
+            if (!evaluationObj) return "Chưa có đánh giá";
 
             const override = qaOverrideSummary.get(convId);
             if (override) return override;
 
-            const summary = evalObj.summary;
+            const summary = evaluationObj.summary;
             if (!summary) return "Chưa có đánh giá chi tiết";
 
             // Create detailed note from available information
@@ -465,8 +507,8 @@ const Index = () => {
             if (summary.safety) metrics.push(`Safety: ${summary.safety}`);
 
             // Add additional context from evaluation
-            if (evalObj.feedback) details.push(`Feedback: ${evalObj.feedback}`);
-            if (evalObj.notes) details.push(`Notes: ${evalObj.notes}`);
+            if (evaluationObj.feedback) details.push(`Feedback: ${evaluationObj.feedback}`);
+            if (evaluationObj.notes) details.push(`Notes: ${evaluationObj.notes}`);
 
             // Combine metrics and details
             const result = [];
@@ -482,18 +524,18 @@ const Index = () => {
 
           // Get review note with fallback to QA summary
           const getReviewNote = () => {
-            if (!evalObj) return "Chưa có đánh giá";
+            if (!evaluationObj) return "Chưa có đánh giá";
 
             const override = qaOverrideSummary.get(convId);
             if (override) return override;
 
             // If has review_note, use it
-            if (evalObj.review_note) {
-              return evalObj.review_note;
+            if (evaluationObj.review_note) {
+              return evaluationObj.review_note;
             }
 
             // If no review_note, use QA highlight and content as fallback
-            const summary = evalObj.summary;
+            const summary = evaluationObj.summary;
             if (summary) {
               const content = [];
 
@@ -519,8 +561,8 @@ const Index = () => {
               }
 
               // Add feedback and notes if available
-              if (evalObj.feedback) content.push(`💬 Feedback: ${evalObj.feedback}`);
-              if (evalObj.notes) content.push(`📝 Notes: ${evalObj.notes}`);
+              if (evaluationObj.feedback) content.push(`💬 Feedback: ${evaluationObj.feedback}`);
+              if (evaluationObj.notes) content.push(`📝 Notes: ${evaluationObj.notes}`);
 
               if (content.length > 0) {
                 return content.join("\n\n");
@@ -713,7 +755,7 @@ const Index = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-green-900 dark:text-green-100">
-                        {(evalsData?.length || 0).toLocaleString()}
+                        {(evaluationsData?.length || 0).toLocaleString()}
                       </div>
                       <p className="text-xs text-green-700 dark:text-green-300">
                         Completed assessments
@@ -728,7 +770,7 @@ const Index = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-purple-900 dark:text-purple-100">
-                        {evalsData?.length ? Math.round((evalsData.filter(e => getOverallBucket((e.evaluation_result as any)?.summary?.overall || "") === "good").length / evalsData.length) * 100) : 0}%
+                        {evaluationsData?.length ? Math.round((evaluationsData.filter(e => getOverallBucket((e.evaluation_result as any)?.summary?.overall || "") === "good").length / evaluationsData.length) * 100) : 0}%
                       </div>
                       <p className="text-xs text-purple-700 dark:text-purple-300">
                         Overall performance
@@ -743,7 +785,7 @@ const Index = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold text-orange-900 dark:text-orange-100">
-                        {evalsData ? evalsData.filter(e => {
+                        {evaluationsData ? evaluationsData.filter(e => {
                           // Since we don't have created_at in EvaluationRecord,
                           // we'll show a placeholder or calculate based on available data
                           return true; // For now, show all evaluations as "recent"
@@ -999,7 +1041,7 @@ const Index = () => {
                         <h2 className="text-lg sm:text-xl font-bold text-foreground">Conversations</h2>
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">
-                            {evalMap.size} đã đánh giá
+                            {evaluationMap.size} đã đánh giá
                           </span>
                           <Button
                             variant="ghost"
@@ -1149,7 +1191,19 @@ const Index = () => {
                       </div>
                       <div className="space-y-1">
                         <Label>Số điện thoại</Label>
-                        <Input placeholder="Lọc theo số điện thoại" className="w-full" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+                        <Input
+                          placeholder="Lọc theo số điện thoại (VD: 0987654321, +84987654321)"
+                          className="w-full"
+                          value={searchInput}
+                          onChange={(e) => {
+                            const formatted = formatPhoneNumber(e.target.value);
+                            setSearchInput(formatted);
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Tên Bot</Label>
+                        <Input placeholder="Lọc theo tên bot" className="w-full" value={botNameSearch} onChange={(e) => setBotNameSearch(e.target.value)} />
                       </div>
                       <div className="space-y-1">
                         <Label>Bot</Label>
@@ -1213,9 +1267,100 @@ const Index = () => {
                     </div>
                     </CollapsibleContent>
                     </Collapsible>
+
+                    {/* Advanced Search Panel */}
+                    <Collapsible open={advancedSearchOpen} onOpenChange={setAdvancedSearchOpen}>
+                      <div className="flex items-center justify-between mb-2">
+                        <Label className="text-sm font-medium">Tìm kiếm nâng cao</Label>
+                        <Button variant="ghost" size="sm" onClick={() => setAdvancedSearchOpen(!advancedSearchOpen)}>
+                          {advancedSearchOpen ? "Thu gọn" : "Mở rộng"}
+                        </Button>
+                      </div>
+                      <CollapsibleContent>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4 p-4 border rounded-lg bg-muted/20">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Quick Filters</Label>
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setQaFilter("qa");
+                                  setClientPage(1);
+                                }}
+                                className="text-xs"
+                              >
+                                Có QA
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setQaFilter("notqa");
+                                  setClientPage(1);
+                                }}
+                                className="text-xs"
+                              >
+                                Chưa QA
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setOverallFilter("good");
+                                  setClientPage(1);
+                                }}
+                                className="text-xs"
+                              >
+                                Tốt
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setOverallFilter("bad");
+                                  setClientPage(1);
+                                }}
+                                className="text-xs"
+                              >
+                                Kém
+                              </Button>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Search History</Label>
+                            <div className="text-xs text-muted-foreground">
+                              Các tìm kiếm gần đây sẽ xuất hiện ở đây
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Actions</Label>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSearchInput("");
+                                  setConvIdSearch("");
+                                  setBotNameSearch("");
+                                  setQaFilter("all");
+                                  setOverallFilter("all");
+                                  setReviewFilter("all");
+                                  setClientPage(1);
+                                }}
+                                className="text-xs"
+                              >
+                                Xóa tất cả
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mb-4">
                       <Input
-                        placeholder="Mã hội thoại"
+                        placeholder="Nhập mã hội thoại để tìm và chọn"
                         value={convIdSearch}
                         onChange={(e) => setConvIdSearch(e.target.value)}
                         onKeyDown={async (e) => {
@@ -1226,9 +1371,10 @@ const Index = () => {
                               setIsSearchingConvId(true);
                               const conv = await getConversation(convIdSearch.trim());
                               setActiveConversationId(convIdSearch.trim());
-                              setPinnedConv(conv);
+                              setSelectedConvIds([convIdSearch.trim()]); // Auto-select conversation
                               setClientPage(1);
-                              toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} loaded` });
+                              setConvIdSearch(""); // Clear search input after successful load
+                              toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} đã được chọn và hiển thị ở đầu danh sách` });
                             } catch (err) {
                               const m = err instanceof Error ? err.message : "Conversation not found";
                               toast({ title: "Load failed", description: m });
@@ -1249,9 +1395,9 @@ const Index = () => {
                               setIsSearchingConvId(true);
                               const conv = await getConversation(convIdSearch.trim());
                               setActiveConversationId(convIdSearch.trim());
-                              setPinnedConv(conv);
+                              setSelectedConvIds([convIdSearch.trim()]); // Auto-select conversation
                               setClientPage(1);
-                              toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} loaded` });
+                              toast({ title: "Loaded", description: `Conversation ${convIdSearch.trim()} đã được chọn và hiển thị ở đầu danh sách` });
                             } catch (err) {
                               const m = err instanceof Error ? err.message : "Conversation not found";
                               toast({ title: "Load failed", description: m });
@@ -1261,7 +1407,7 @@ const Index = () => {
                           }}
                           className="text-xs sm:text-sm"
                         >
-                          {isSearchingConvId ? "Đang tải..." : "Tải"}
+                          {isSearchingConvId ? "Đang tìm..." : "Tìm"}
                         </Button>
                         <Button
                           onClick={async () => {
@@ -1328,7 +1474,7 @@ const Index = () => {
                           let all = (conversationsData ?? [])
                             .filter((c) => {
                               const cid = c.conversation_id ?? String(c.id);
-                              const rec = evalMap.get(cid);
+                              const rec = evaluationMap.get(cid);
                               const has = !!rec;
                               if (qaFilter === "qa" && !has) return false;
                               if (qaFilter === "notqa" && has) return false;
@@ -1358,14 +1504,6 @@ const Index = () => {
 
                           return (
                             <>
-                              {pinnedConv && (
-                                <div className="mb-2 p-2 rounded border border-border bg-accent/20 text-xs">
-                                  <div className="flex items-center justify-between">
-                                    <div className="font-medium">Pinned: {pinnedConv.conversation_id ?? String(pinnedConv.id)}</div>
-                                    <Button size="sm" variant="outline" onClick={() => setPinnedConv(null)}>Unpin</Button>
-                                  </div>
-                                </div>
-                              )}
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -1388,19 +1526,19 @@ const Index = () => {
                           const created = conv.created_at ? new Date(conv.created_at).toLocaleString() : "";
                           const isSelected = selectedConvIds.includes(convId);
                                     const isRunning = qaRunningIds.has(convId);
-                                    const evalRecord = evalMap.get(convId);
-                                    const evalObj: any = evalRecord?.evaluation_result || null;
+                                    const evaluationRecord = evaluationMap.get(convId);
+                                    const evaluationObj: any = evaluationRecord?.evaluation_result || null;
                                     const qaOverall = (() => {
                                       const override = qaOverrideSummary.get(convId);
                                       if (override) return override;
-                                      const summary = evalObj?.summary || null;
+                                      const summary = evaluationObj?.summary || null;
                                       return summary?.overall ?? "";
                                     })();
 
-                                    const qaHighlights: string[] = Array.isArray(evalObj?.summary?.highlights) ? evalObj?.summary?.highlights : [];
-                                    const reviewed = evalMap.get(convId)?.reviewed ?? false;
-                                    const reviewNote = evalMap.get(convId)?.review_note ?? "";
-                                    const qaCounts: Record<string, unknown> = evalObj?.summary?.counts || {};
+                                    const qaHighlights: string[] = Array.isArray(evaluationObj?.summary?.highlights) ? evaluationObj?.summary?.highlights : [];
+                                    const reviewed = evaluationMap.get(convId)?.reviewed ?? false;
+                                    const reviewNote = evaluationMap.get(convId)?.review_note ?? "";
+                                    const qaCounts: Record<string, unknown> = evaluationObj?.summary?.counts || {};
 
                           return (
                                       <TableRow key={convId}>
@@ -1636,16 +1774,16 @@ const Index = () => {
                             <TableBody>
                               {selectedConversations.map((conv) => {
                                 const convId = conv.conversation_id ?? String(conv.id);
-                                const evalObj: any = evalMap.get(convId)?.evaluation_result || null;
+                                const evaluationObj: any = evaluationMap.get(convId)?.evaluation_result || null;
                                 const qaOverall = (() => {
                                   const override = qaOverrideSummary.get(convId);
                                   if (override) return override;
-                                  const summary = evalObj?.summary || null;
+                                  const summary = evaluationObj?.summary || null;
                                   return summary?.overall ?? "Chưa đánh giá";
                                 })();
 
                                 return (
-                                  <TableRow key={convId} className={evalObj ? "border-l-4" : ""} style={evalObj ? { borderLeftColor: qaOverall.includes("Good") || qaOverall.includes("tốt") ? "#10b981" : qaOverall.includes("Warn") || qaOverall.includes("trung bình") ? "#f59e0b" : qaOverall.includes("Bad") || qaOverall.includes("kém") ? "#ef4444" : "#6b7280" } : {}}>
+                                  <TableRow key={convId} className={evaluationObj ? "border-l-4" : ""} style={evaluationObj ? { borderLeftColor: qaOverall.includes("Good") || qaOverall.includes("tốt") ? "#10b981" : qaOverall.includes("Warn") || qaOverall.includes("trung bình") ? "#f59e0b" : qaOverall.includes("Bad") || qaOverall.includes("kém") ? "#ef4444" : "#6b7280" } : {}}>
                                     <TableCell className="font-mono text-sm bg-muted/20">
                                       <div className="flex items-center gap-2">
                                         <span className="text-xs text-muted-foreground">ID:</span>
@@ -1658,49 +1796,49 @@ const Index = () => {
                                           <div className={`w-2 h-2 rounded-full mr-2 ${qaOverall.includes("Good") || qaOverall.includes("tốt") ? "bg-emerald-500" : qaOverall.includes("Warn") || qaOverall.includes("trung bình") ? "bg-amber-500" : qaOverall.includes("Bad") || qaOverall.includes("kém") ? "bg-rose-500" : "bg-gray-400"}`}></div>
                                           {qaOverall}
                                         </div>
-                                        {evalObj && evalObj.summary?.highlights && evalObj.summary.highlights.length > 0 && (
+                                        {evaluationObj && evaluationObj.summary?.highlights && evaluationObj.summary.highlights.length > 0 && (
                                           <div className="text-xs text-muted-foreground">
                                             <div className="text-xs font-medium mb-1">Highlights:</div>
                                             <ul className="space-y-1">
-                                              {evalObj.summary.highlights.slice(0, 2).map((highlight: string, index: number) => (
+                                              {evaluationObj.summary.highlights.slice(0, 2).map((highlight: string, index: number) => (
                                                 <li key={index} className="text-xs text-muted-foreground leading-tight">
                                                   • {highlight}
                                                 </li>
                                               ))}
-                                              {evalObj.summary.highlights.length > 2 && (
+                                              {evaluationObj.summary.highlights.length > 2 && (
                                                 <li className="text-xs text-muted-foreground italic">
-                                                  +{evalObj.summary.highlights.length - 2} more...
+                                                  +{evaluationObj.summary.highlights.length - 2} more...
                                                 </li>
                                               )}
                                             </ul>
                                           </div>
                                         )}
-                                        {evalObj && (
+                                        {evaluationObj && (
                                           <div className="text-xs text-muted-foreground">
-                                            {evalObj.reviewed && <span className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">Đã review</span>}
+                                            {evaluationObj.reviewed && <span className="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">Đã review</span>}
                                           </div>
                                         )}
                                       </div>
                                     </TableCell>
                                     <TableCell className="text-sm">
                                       <div className="whitespace-pre-wrap text-sm leading-relaxed bg-muted/30 p-3 rounded border-l-2 border-primary/20 min-h-[80px]">
-                                        {evalObj && evalObj.review_note ? (
-                                          <div className="text-foreground">{evalObj.review_note}</div>
-                                        ) : evalObj && evalObj.summary?.highlights && evalObj.summary.highlights.length > 0 ? (
+                                        {evaluationObj && evaluationObj.review_note ? (
+                                          <div className="text-foreground">{evaluationObj.review_note}</div>
+                                        ) : evaluationObj && evaluationObj.summary?.highlights && evaluationObj.summary.highlights.length > 0 ? (
                                           <div className="text-muted-foreground">
                                             <div className="font-medium text-foreground mb-2">🎯 QA Highlights:</div>
                                             <ul className="space-y-1">
-                                              {evalObj.summary.highlights.map((highlight: string, index: number) => (
+                                              {evaluationObj.summary.highlights.map((highlight: string, index: number) => (
                                                 <li key={index} className="text-xs leading-relaxed">
                                                   • {highlight}
                                                 </li>
                                               ))}
                                             </ul>
                                           </div>
-                                        ) : evalObj && evalObj.summary?.overall ? (
+                                        ) : evaluationObj && evaluationObj.summary?.overall ? (
                                           <div className="text-muted-foreground">
                                             <div className="font-medium text-foreground mb-2">📊 Summary:</div>
-                                            <div className="text-sm">{evalObj.summary.overall}</div>
+                                            <div className="text-sm">{evaluationObj.summary.overall}</div>
                                           </div>
                                         ) : (
                                           <div className="text-muted-foreground">Chưa có đánh giá</div>

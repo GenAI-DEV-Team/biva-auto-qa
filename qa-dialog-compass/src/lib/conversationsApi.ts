@@ -6,6 +6,8 @@ export async function listConversations(params?: {
   start_ts?: string;
   end_ts?: string;
   phone_like?: string;
+  conversation_id_like?: string;
+  bot_name_like?: string;
   qa_status?: string;
   review_status?: string;
   overall_status?: string;
@@ -17,6 +19,8 @@ export async function listConversations(params?: {
   if (params?.start_ts) search.set("start_ts", params.start_ts);
   if (params?.end_ts) search.set("end_ts", params.end_ts);
   if (params?.phone_like) search.set("phone_like", params.phone_like);
+  if (params?.conversation_id_like) search.set("conversation_id_like", params.conversation_id_like);
+  if (params?.bot_name_like) search.set("bot_name_like", params.bot_name_like);
   if (params?.qa_status) search.set("qa_status", params.qa_status);
   if (params?.review_status) search.set("review_status", params.review_status);
   if (params?.overall_status) search.set("overall_status", params.overall_status);
