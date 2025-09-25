@@ -7,6 +7,7 @@ from app.core.db import get_read_db, get_db
 from app.models.base import Bot, BotVersion, Evaluation
 from app.utils.prompt_loader import load_prompt
 from app.services.openai_client import openai_service
+from app.core.redis import get_redis
 import json
 import asyncio
 
@@ -261,6 +262,26 @@ async def run_qa(
             write_db.add(eval_row)
 
     await write_db.commit()
+
+    # Invalidate evaluations cache after creating new evaluations
+    try:
+        redis = await get_redis()
+        # Delete specific list cache keys
+        eval_list_keys = []
+        async for key in redis.scan_iter("eval:list:*"):
+            eval_list_keys.append(key)
+
+        if eval_list_keys:
+            await redis.delete(*eval_list_keys)
+
+        # Also clear any individual evaluation caches for the updated conversations
+        for conv, res in zip(conversations, results):
+            if res.ok:
+                conv_id = res.conversation_id or (conv.get("conversation_id") or "")
+                if conv_id:
+                    await redis.delete(f"eval:by_id:{conv_id}")
+    except Exception as e:
+        print(f"Failed to invalidate evaluations cache: {e}")
 
     return results
 

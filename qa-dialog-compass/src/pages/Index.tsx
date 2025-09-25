@@ -19,7 +19,7 @@ import { useAutoRefresh, useQACompletionRefresh } from "@/hooks/use-auto-refresh
 import type { BotResponse } from "@/types/bots";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { AutoRefreshIndicator } from "@/components/ui/auto-refresh-indicator";
+import { RefreshCw } from "lucide-react";
 import { listConversations, listSpans, getConversation } from "@/lib/conversationsApi";
 import { getEvaluation, runQAEvaluations, listEvaluations, updateEvaluationReview } from "@/lib/evaluationsApi";
 import { getSheetsList, getConversationsForSheets, updateGoogleSheets, type SheetInfo, type ConversationRow, type UpdateRequest } from "@/lib/sheetsApi";
@@ -136,14 +136,37 @@ const Index = () => {
   const { refreshAfterQA } = useQACompletionRefresh();
 
   const handleRefreshAfterQA = async (conversationIds: string[]) => {
-    setIsAutoRefreshing(true);
     try {
-      await refreshAfterQA(conversationIds);
-      setLastUpdate(new Date());
-    } finally {
-      setIsAutoRefreshing(false);
+      // Force re-render immediately
+      setEvalDataVersion(prev => prev + 1);
+
+      // Force refresh evaluations multiple times for reliability
+      await refetchEvals(); // First refresh
+      await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+      await refetchEvals(); // Second refresh
+      await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+      await refetchEvals(); // Third refresh
+    } catch (error) {
+      console.error(`Error during QA completion refresh:`, error);
     }
   };
+
+
+  // Manual refresh function
+  const handleManualRefresh = async () => {
+    try {
+      // Force refresh evaluations
+      await refetchEvals();
+
+      // Invalidate all relevant queries
+      await queryClient.invalidateQueries({ queryKey: ["evaluations"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations", "all"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    } catch (error) {
+      console.error(`Error during manual refresh:`, error);
+    }
+  };
+
   const { data: botsData, isLoading: botsLoading, isError: botsError, error: botsErrorObj, refetch: refetchBots } = useQuery({
     queryKey: ["bots", { limit: 100 }],
     queryFn: () => listBots({ limit: 100 }),
@@ -185,9 +208,7 @@ const Index = () => {
   const [clientPage, setClientPage] = useState<number>(1);
   const clientPageSize = 20;
 
-  // Auto refresh state
-  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [evalDataVersion, setEvalDataVersion] = useState(0); // Force re-render when evaluations update
 
   // Get ALL conversations for client-side filtering and pagination
   // Backend filters: bot_id, time range, phone_like, qa_status (basic + QA filters)
@@ -262,18 +283,27 @@ const Index = () => {
   });
 
   // Recent evaluations for QA summaries and filtering
-  const { data: evalsData } = useQuery({
+  // Query for evaluations with aggressive polling
+  const { data: evalsData, refetch: refetchEvals } = useQuery({
     queryKey: ["evaluations", { limit: 200 }],
     queryFn: () => listEvaluations(200),
     enabled: activeTab === "conversations",
-    staleTime: 30 * 1000, // Reduce to 30 seconds for faster refresh
+    staleTime: 1 * 1000, // Reduce to 1 second for real-time refresh
     gcTime: 5 * 60 * 1000,
-    refetchInterval: activeTab === "conversations" ? 30000 : false, // Poll every 30s when on conversations tab
+    refetchInterval: activeTab === "conversations" ? 1000 : false, // Poll every 1s when on conversations tab
+    refetchIntervalInBackground: true, // Keep polling even when tab is not active
   });
   const evalMap = useMemo(() => {
     const m = new Map<string, EvaluationRecord>();
     for (const e of evalsData ?? []) m.set(e.conversation_id, e);
     return m;
+  }, [evalsData, qaRunningIds, evalDataVersion]);
+
+  // Monitor evaluations data changes and force re-render
+  useEffect(() => {
+    if (evalsData) {
+      setEvalDataVersion(prev => prev + 1);
+    }
   }, [evalsData]);
 
   // Client-side filtering and pagination logic (moved after evalMap definition)
@@ -377,9 +407,10 @@ const Index = () => {
     const isGood = ["good", "pass", "ok", "tốt", "đạt"].some((k) => t.includes(k));
     const isWarn = ["warn", "warning", "medium", "average", "ổn", "trung bình"].some((k) => t.includes(k));
     const isBad = ["fail", "failed", "bad", "poor", "kém", "lỗi", "error"].some((k) => t.includes(k));
-    if (isGood) return "bg-emerald-500/20 text-emerald-700"; // xanh
-    if (isWarn) return "bg-amber-500/25 text-amber-800";      // vàng đậm
-    if (isBad) return "bg-rose-500/20 text-rose-700";         // đỏ
+
+    if (isGood) return "bg-emerald-100 text-emerald-800"; // xanh lá - stronger contrast
+    if (isWarn) return "bg-amber-100 text-amber-900";      // vàng - stronger contrast
+    if (isBad) return "bg-rose-100 text-rose-900";         // đỏ - stronger contrast
     return "bg-muted text-foreground";
   };
 
@@ -966,11 +997,19 @@ const Index = () => {
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-2">
                       <div className="flex items-center gap-2">
                         <h2 className="text-lg sm:text-xl font-bold text-foreground">Conversations</h2>
-                        <AutoRefreshIndicator
-                          isRefreshing={isAutoRefreshing || conversationsLoading}
-                          lastUpdate={lastUpdate}
-                          className="ml-2"
-                        />
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {evalMap.size} đã đánh giá
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleManualRefresh}
+                            className="h-6 w-6 p-0"
+                          >
+                            <RefreshCw className="h-3 w-3" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                     {conversationsBotFilter != null && (
@@ -1349,46 +1388,83 @@ const Index = () => {
                           const created = conv.created_at ? new Date(conv.created_at).toLocaleString() : "";
                           const isSelected = selectedConvIds.includes(convId);
                                     const isRunning = qaRunningIds.has(convId);
-                                    const evalObj: any = evalMap.get(convId)?.evaluation_result || null;
+                                    const evalRecord = evalMap.get(convId);
+                                    const evalObj: any = evalRecord?.evaluation_result || null;
                                     const qaOverall = (() => {
                                       const override = qaOverrideSummary.get(convId);
                                       if (override) return override;
                                       const summary = evalObj?.summary || null;
                                       return summary?.overall ?? "";
                                     })();
+
                                     const qaHighlights: string[] = Array.isArray(evalObj?.summary?.highlights) ? evalObj?.summary?.highlights : [];
                                     const reviewed = evalMap.get(convId)?.reviewed ?? false;
                                     const reviewNote = evalMap.get(convId)?.review_note ?? "";
                                     const qaCounts: Record<string, unknown> = evalObj?.summary?.counts || {};
+
                           return (
                                       <TableRow key={convId}>
                                         <TableCell><input type="checkbox" checked={isSelected} onChange={(e) => setSelectedConvIds((prev) => e.target.checked ? [...prev, convId] : prev.filter((id) => id !== convId))} /></TableCell>
-                                        <TableCell className={`font-mono text-xs truncate max-w-[220px] px-2 py-1 rounded ${qaOverall ? getOverallClasses(qaOverall) : ""}`} title={convId}>{convId}</TableCell>
+                                        <TableCell className={`font-mono text-xs truncate max-w-[220px] px-2 py-1 rounded ${qaOverall ? getOverallClasses(qaOverall) : ""}`} title={convId}>
+                                          <div className="flex flex-col gap-1">
+                                            <div className="flex items-center gap-2">
+                                              <span>{convId}</span>
+                                              {qaOverall && (
+                                                <div className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getOverallClasses(qaOverall)}`}>
+                                                  <div className={`w-2 h-2 rounded-full mr-1 ${qaOverall.includes("Good") || qaOverall.includes("tốt") ? "bg-emerald-500" : qaOverall.includes("Warn") || qaOverall.includes("trung bình") ? "bg-amber-500" : qaOverall.includes("Bad") || qaOverall.includes("kém") ? "bg-rose-500" : "bg-gray-400"}`}></div>
+                                                  {qaOverall}
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </TableCell>
                                         <TableCell className="text-xs text-muted-foreground truncate max-w-[120px]" title={phone}>{phone}</TableCell>
                                         <TableCell className="text-xs">{conv.bot_id ?? "-"}</TableCell>
                                         <TableCell className="text-xs text-muted-foreground truncate max-w-[120px]" title={created}>{created}</TableCell>
                                         <TableCell className="text-xs align-top max-w-[640px]">
-                                          {/* {Object.keys(qaCounts).length > 0 && (
-                                            <div className="flex flex-wrap gap-1 mb-1">
-                                              {Object.entries(qaCounts).map(([k, v]) => (
-                                                <span key={k} className="px-1.5 py-0.5 rounded bg-accent/40 text-foreground whitespace-nowrap">{k}: {String(v)}</span>
-                                              ))}
-                                </div>
-                                          )} */}
-                                          <div className="flex items-center gap-2 mb-1">
-                                            {reviewed && (
-                                              <Badge variant="secondary" className="text-[10px]">Đã review</Badge>
+                                          <div className="space-y-2">
+                                            <div className="flex items-center gap-2 mb-1">
+                                              {reviewed && (
+                                                <Badge variant="secondary" className="text-[10px]">Đã review</Badge>
+                                              )}
+                                              {qaOverall && (
+                                                <div className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getOverallClasses(qaOverall)}`}>
+                                                  <div className={`w-2 h-2 rounded-full mr-1 ${qaOverall.includes("Good") || qaOverall.includes("tốt") ? "bg-emerald-500" : qaOverall.includes("Warn") || qaOverall.includes("trung bình") ? "bg-amber-500" : qaOverall.includes("Bad") || qaOverall.includes("kém") ? "bg-rose-500" : "bg-gray-400"}`}></div>
+                                                  {qaOverall}
+                                                </div>
+                                              )}
+                                            </div>
+
+                                            {qaHighlights.length > 0 && (
+                                              <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-md p-2">
+                                                <div className="text-xs font-semibold text-amber-800 dark:text-amber-200 mb-1 flex items-center gap-1">
+                                                  <span className="text-amber-500">⭐</span>
+                                                  Highlights
+                                                </div>
+                                                <ul className="space-y-1">
+                                                  {qaHighlights.slice(0, 3).map((highlight, idx) => (
+                                                    <li key={idx} className="flex items-start gap-1 text-xs text-amber-900 dark:text-amber-100 leading-tight">
+                                                      <span className="text-amber-500 mt-0.5">•</span>
+                                                      <span className="flex-1 break-words">{highlight}</span>
+                                                    </li>
+                                                  ))}
+                                                  {qaHighlights.length > 3 && (
+                                                    <li className="text-xs text-amber-700 dark:text-amber-300">
+                                                      +{qaHighlights.length - 3} more...
+                                                    </li>
+                                                  )}
+                                                </ul>
+                                              </div>
                                             )}
+
+                                            {/* {Object.keys(qaCounts).length > 0 && (
+                                              <div className="flex flex-wrap gap-1 mt-2">
+                                                {Object.entries(qaCounts).map(([k, v]) => (
+                                                  <span key={k} className="px-1.5 py-0.5 rounded bg-accent/40 text-foreground whitespace-nowrap text-xs">{k}: {String(v)}</span>
+                                                ))}
+                                              </div>
+                                            )} */}
                                           </div>
-                                          {qaHighlights.length > 0 ? (
-                                            <ul className="list-disc pl-4 space-y-1">
-                                              {qaHighlights.map((h, i) => (
-                                                <li key={i} className="text-foreground break-words">{h}</li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <span className="text-muted-foreground"></span>
-                                          )}
                                         </TableCell>
                                         <TableCell className="text-right">
                                           <div className="flex items-center justify-end gap-2">
@@ -1737,12 +1813,13 @@ const Index = () => {
                       // Use the new refresh hook for comprehensive updates
                       await handleRefreshAfterQA(ids);
 
+                      // Clear override summary to let real QA data show
                       setQaOverrideSummary((prev) => {
                         const n = new Map(prev);
-                        ids.forEach((id) => n.set(id, "updated"));
+                        ids.forEach((id) => n.delete(id)); // Remove any overrides to show real QA data
                         return n;
                       });
-                      toast({ title: "QA started", description: `Đang chạy QA cho ${ids.length} hội thoại. UI sẽ tự động cập nhật khi hoàn thành.` });
+                      toast({ title: "QA started", description: `Đang chạy QA cho ${ids.length} hội thoại.` });
                     } catch (err) {
                       const m = err instanceof Error ? err.message : "Failed to run QA";
                       toast({ title: "Run QA failed", description: m });

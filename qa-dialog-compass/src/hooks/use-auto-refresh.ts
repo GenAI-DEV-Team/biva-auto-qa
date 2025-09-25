@@ -60,6 +60,8 @@ export function useQACompletionRefresh() {
   const queryClient = useQueryClient();
 
   const refreshAfterQA = async (conversationIds: string[]) => {
+    console.log(`🔄 Refreshing after QA completion for conversations:`, conversationIds);
+
     // Invalidate individual evaluations
     await Promise.all(
       conversationIds.map(id =>
@@ -68,11 +70,16 @@ export function useQACompletionRefresh() {
     );
 
     // Invalidate evaluations list
-    queryClient.invalidateQueries({ queryKey: ["evaluations"] });
+    await queryClient.invalidateQueries({ queryKey: ["evaluations"] });
 
     // Invalidate conversations list
-    queryClient.invalidateQueries({ queryKey: ["conversations", "all"] });
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    await queryClient.invalidateQueries({ queryKey: ["conversations", "all"] });
+    await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+
+    // Wait a bit for data to be refreshed
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log(`✅ QA refresh completed for conversations:`, conversationIds);
   };
 
   return { refreshAfterQA };
