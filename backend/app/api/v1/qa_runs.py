@@ -6,6 +6,9 @@ from sqlalchemy import text, select
 from app.core.db import get_read_db, get_db
 from app.models.base import Bot, BotVersion, Evaluation
 from app.utils.prompt_loader import load_prompt
+from app.api.v1.auth import get_current_user_optional
+from app.models.base import UserPrompt, User
+from sqlalchemy import select
 from app.services.openai_client import openai_service
 from app.core.redis import get_redis
 import json
@@ -167,6 +170,7 @@ async def run_qa(
     body: QARunRequest,
     read_db: AsyncSession = Depends(get_read_db),
     write_db: AsyncSession = Depends(get_db),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     """Run Auto-QA for conversations.
 
@@ -190,8 +194,17 @@ async def run_qa(
     if not conversations:
         raise HTTPException(status_code=404, detail="No conversations found to evaluate")
 
-    # Preload system prompt
-    qa_system_prompt = load_prompt("qa.md")
+    # Resolve system prompt: use current user's saved prompt if available; else fallback to default qa.md
+    if current_user is not None:
+        q = select(UserPrompt).where(UserPrompt.user_id == current_user.id)
+        res = await write_db.execute(q)
+        up: UserPrompt | None = res.scalar_one_or_none()
+        if up and isinstance(up.prompt, str) and up.prompt.strip():
+            qa_system_prompt = up.prompt
+        else:
+            qa_system_prompt = load_prompt("qa.md")
+    else:
+        qa_system_prompt = load_prompt("qa.md")
 
     # Concurrency control
     semaphore = asyncio.Semaphore(3)

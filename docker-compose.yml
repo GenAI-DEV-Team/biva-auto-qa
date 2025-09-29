@@ -61,24 +61,24 @@ services:
     networks:
       - autoqa-net
 
-  # backend-migrate:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   env_file:
-  #     - ./backend/.env
-  #   environment:
-  #     PYTHONUNBUFFERED: 1
-  #     PYTHONDONTWRITEBYTECODE: 1
-  #   volumes:
-  #     - ./backend:/app:ro
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   command: sh -c "cd /app && alembic upgrade head"
-  #   restart: "no"
-  #   networks:
-  #     - autoqa-net
+  backend-migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+    volumes:
+      - ./backend:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "cd /app && alembic upgrade head"
+    restart: "no"
+    networks:
+      - autoqa-net
 
   backend:
     build:

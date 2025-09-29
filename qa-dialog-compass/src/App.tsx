@@ -9,6 +9,7 @@ import { LoginForm } from "./components/auth/LoginForm";
 import { RegisterForm } from "./components/auth/RegisterForm";
 import Index from "./pages/Index";
 import ConversationDetail from "./pages/ConversationDetail";
+import PromptEditor from "./pages/PromptEditor";
 import NotFound from "./pages/NotFound";
 import { toast } from "@/hooks/use-toast";
 
@@ -45,6 +46,11 @@ const App = () => (
             <Route path="/" element={
               <ProtectedRoute>
                 <Index />
+              </ProtectedRoute>
+            } />
+            <Route path="/prompt" element={
+              <ProtectedRoute>
+                <PromptEditor />
               </ProtectedRoute>
             } />
             <Route path="/conversations/:id" element={

@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ["autoqa.trieungoctam.site", "localhost", "127.0.0.1", "nginx", "autoqa-nginx"],
       proxy: {
         "/api": {
-          target: "http://localhost:13886",
+          target: proxyTarget,
           changeOrigin: true,
         },
       },

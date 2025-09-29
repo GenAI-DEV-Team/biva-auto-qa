@@ -19,3 +19,17 @@ export async function updateEvaluationReview(conversationId: string, data: { rev
 }
 
 
+// User prompt endpoints
+export async function getMyPrompt(): Promise<{ prompt: string }> {
+  return api.get(`/prompts/me`);
+}
+
+export async function updateMyPrompt(prompt: string): Promise<{ prompt: string }> {
+  return api.put(`/prompts/me`, { prompt });
+}
+
+export async function deleteMyPrompt(): Promise<{ status: string; prompt: string }> {
+  return api.delete(`/prompts/me`);
+}
+
+

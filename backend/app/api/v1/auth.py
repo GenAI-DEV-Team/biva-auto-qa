@@ -15,7 +15,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 router = APIRouter()
-security = HTTPBearer()
+# Make bearer optional where used (via custom dependency)
+security = HTTPBearer(auto_error=True)
 
 class UserCreate(BaseModel):
     username: str
@@ -77,6 +78,30 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
 
+    return user
+
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    db: AsyncSession = Depends(get_db)
+) -> User | None:
+    """Return current user if Authorization header is provided and valid; otherwise None.
+
+    This allows endpoints to behave with optional auth.
+    """
+    if credentials is None:
+        return None
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            return None
+    except jwt.PyJWTError:
+        return None
+
+    query = select(User).where(User.username == username)
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
     return user
 
 @router.post("/register", response_model=UserResponse)

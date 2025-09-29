@@ -9,7 +9,7 @@ from app.workers.celery_app import celery_app
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    await create_tables()
+    # await create_tables()
     yield
     # Shutdown
     # Add graceful shutdown hooks here if needed

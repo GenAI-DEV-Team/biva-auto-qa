@@ -110,3 +110,20 @@ class User(Base):
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}')>"
+
+
+class UserPrompt(Base):
+    __tablename__ = "user_prompts"
+    __table_args__ = (
+        Index('idx_user_prompt_user_id', 'user_id', unique=True),
+        Index('idx_user_prompt_updated_at', 'updated_at'),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    prompt = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<UserPrompt(user_id={self.user_id})>"
